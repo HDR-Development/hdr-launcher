@@ -1,0 +1,108 @@
+:root {
+    --main-bg-color: rgb(14, 87, 26);
+    --main-text-color: white;
+    --main-button-text-color: white;
+    --main-button-bg-color: black;
+    --main-button-bg-hover-color: #ABCCFF;
+    --main-button-text-hover-color: black;
+    --main-button-bg-focus-color: rgb(120, 71, 255);
+    --main-button-text-focus-color: black;
+    --main-progress-background-color: black;
+    --main-progress-foreground-color: red;
+    --main-progress-text-color: white;
+}
+
+* {
+    font-family: Arial, Helvetica, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    width: 1280px;
+    height: 720px;
+}
+
+body {
+    background-color: var(--main-bg-color);
+    color: var(--main-text-color);
+}
+
+#title {
+    font-style: italic;
+    padding: 10px;
+}
+
+#buttons>button {
+    padding: 12px 26px;
+    margin: 10px 0;
+    display: block;
+    width: 400px;
+    height: 90px;
+    text-align: right;
+    font-size: 3rem;
+    font-weight: bold;
+    font-style: italic;
+    background-color: var(--main-button-bg-color);
+    color: var(--main-text-color);
+    border: none;
+    clip-path: polygon(95% 0, 100% 38%, 95% 100%, 0 100%, 0 0);
+    -webkit-clip-path: polygon(95% 0, 100% 38%, 95% 100%, 0 100%, 0 0);
+    position: relative;
+    z-index: 1;
+}
+
+.active,
+#buttons>button:hover {
+    background-color: var(--main-button-bg-hover-color) !important;
+    color: var(--main-button-text-hover-color) !important;
+}
+
+#buttons>button:active {
+    background-color: var(--main-button-bg-focus-color) !important;
+    color: var(--main-button-text-focus-color) !important;
+}
+
+.desc-container {
+    margin: 0 auto;
+    width: 90%;
+    padding: 10px 15px;
+    border: 2px solid white;
+    transform: skew(5deg, 0deg);
+}
+
+#btn-desc {
+    padding: 5px 0px;
+    font-size: 1.5rem;
+    text-align: center;
+    color: white;
+}
+
+#progressSection {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+
+#progressParent {
+    height: 50px;
+    width: 100%;
+    background-color: var(--main-progress-background-color);
+    clip-path: polygon(2% 0, 98% 0, 100% 50%, 98% 100%, 2% 100%, 0% 50%);
+    -webkit-clip-path: polygon(2% 0, 98% 0, 100% 50%, 98% 100%, 2% 100%, 0% 50%);
+}
+
+#progress {
+    display: block;
+    height: 100%;
+    width: 10%;
+    background-color: var(--main-progress-foreground-color);
+}
+
+#progressText {
+    margin: 10px 0;
+    color: var(--main-progress-text-color);
+    font-size: 1.4rem;
+}
