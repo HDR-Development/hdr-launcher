@@ -6,6 +6,11 @@ function updateBtnDesc(val) {
     document.getElementById("btn-desc").innerHTML = val;
 }
 
+function updateBtnImg(val) {
+    var element = document.getElementById("btn-img");
+    element.setAttribute("src", val);
+}
+
 function viewProgress() {
     activeMenu = "progress";
     document.getElementById("mainMenu").style.display = 'none';
@@ -89,6 +94,7 @@ function move(source, target) {
     source != undefined ? source.classList.remove("active") : false;
     target != undefined ? target.classList.add("active") : false;
     updateBtnDesc(target != undefined ? target.getAttribute("data-desc") : "No Description Avaliable");
+    updateBtnImg(item.getAttribute("data-img") != undefined ? item.getAttribute("data-img") : item.getAttribute("src"));
 }
 
 function click() {
@@ -142,6 +148,7 @@ window.onload = () => {
             document.querySelector(".active").classList.remove("active");
             item.classList.add("active");
             updateBtnDesc(item.getAttribute("data-desc") != undefined ? item.getAttribute("data-desc") : item.innerText);
+            updateBtnImg(item.getAttribute("data-img") != undefined ? item.getAttribute("data-img") : item.getAttribute("src"));
         });
     });
 

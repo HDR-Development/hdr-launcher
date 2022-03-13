@@ -1,12 +1,14 @@
 :root {
-    --main-bg-color: rgb(14, 87, 26);
+    --main-bg-color: rgb(0, 0, 0);
     --main-text-color: white;
     --main-button-text-color: white;
-    --main-button-bg-color: black;
-    --main-button-bg-hover-color: #ABCCFF;
-    --main-button-text-hover-color: black;
-    --main-button-bg-focus-color: rgb(120, 71, 255);
+    --main-button-bg-color: rgb(54, 54, 54);
+    --main-button-bg-hover-color: #74be95;
+    --main-button-text-hover-color: rgb(0, 0, 0);
+    --main-button-bg-focus-color: rgb(49, 119, 49);
     --main-button-text-focus-color: black;
+    --main-button-hover-width: 400px;
+    --main-button-hover-align: right;
     --main-progress-background-color: black;
     --main-progress-foreground-color: red;
     --main-progress-text-color: white;
@@ -38,9 +40,9 @@ body {
     padding: 12px 26px;
     margin: 10px 0;
     display: block;
-    width: 400px;
+    width: 250px;
     height: 90px;
-    text-align: right;
+    text-align: left;
     font-size: 3rem;
     font-weight: bold;
     font-style: italic;
@@ -51,12 +53,16 @@ body {
     -webkit-clip-path: polygon(95% 0, 100% 38%, 95% 100%, 0 100%, 0 0);
     position: relative;
     z-index: 1;
+    transition:100ms linear;
+    -webkit-transition:100ms linear;
 }
 
 .active,
 #buttons>button:hover {
     background-color: var(--main-button-bg-hover-color) !important;
     color: var(--main-button-text-hover-color) !important;
+    width: var(--main-button-hover-width) !important;
+    text-align: var(--main-button-hover-align) !important;
 }
 
 #buttons>button:active {
@@ -69,7 +75,7 @@ body {
     width: 90%;
     padding: 10px 15px;
     border: 2px solid white;
-    transform: skew(5deg, 0deg);
+    transform: skew(-5deg, 0deg);
 }
 
 #btn-desc {
@@ -105,4 +111,21 @@ body {
     margin: 10px 0;
     color: var(--main-progress-text-color);
     font-size: 1.4rem;
+}
+
+.grid-container {
+    display: flex;
+    grid-template-columns: 384px 896px;
+    grid-gap: 89.6px;
+    align-items: center;
+}
+
+.grid-child1 {
+    max-width: 384px;
+    min-width: 384px;
+}
+
+.grid-child2 {
+    max-width: 896px;
+    min-width: 896px;
 }

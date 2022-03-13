@@ -8,6 +8,7 @@ use serde::{Serialize, Deserialize};
 static HTML_TEXT: &str = include_str!("./web/index.html");
 static JS_TEXT: &str = include_str!("./web/script.js");
 static CSS_TEXT: &str = include_str!("./web/style.css");
+static LOGO_PNG: &[u8] = include_bytes!("./web/logo.png");
 
 #[derive(Serialize, Debug)]
 struct Info {
@@ -56,6 +57,7 @@ pub fn main() {
             .file("index.html", &HTML_TEXT)
             .file("script.js", &JS_TEXT)
             .file("style.css", &CSS_TEXT)
+            .file("logo.png", &LOGO_PNG)
             .background(skyline_web::Background::Default)
             .boot_display(skyline_web::BootDisplay::Default)
             .open_session(skyline_web::Visibility::InitiallyHidden).unwrap();
