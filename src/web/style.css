@@ -8,9 +8,10 @@
     --main-button-bg-focus-color: rgb(49, 119, 49);
     --main-button-text-focus-color: black;
     --main-button-hover-width: 400px;
+    --main-button-text-hover-width: 390px;
     --main-button-hover-align: right;
-    --main-progress-background-color: black;
-    --main-progress-foreground-color: red;
+    --main-progress-background-color: rgb(49, 49, 49);
+    --main-progress-foreground-color: rgb(41, 109, 47);
     --main-progress-text-color: white;
 }
 
@@ -29,6 +30,8 @@ body {
 body {
     background-color: var(--main-bg-color);
     color: var(--main-text-color);
+    transition: 1000ms linear;
+    -webkit-transition: 1000ms linear;
 }
 
 #title {
@@ -36,13 +39,39 @@ body {
     padding: 10px;
 }
 
+#mainMenu {
+    transition: 1000ms linear;
+    -webkit-transition: 1000ms linear;
+}
+
 #buttons>button {
     padding: 12px 26px;
     margin: 10px 0;
     display: block;
-    width: 250px;
+    width: 275px;
     height: 90px;
     text-align: left;
+    font-size: 3rem;
+    font-weight: bold;
+    font-style: italic;
+    border: none;
+    clip-path: polygon(95% 0, 100% 38%, 95% 100%, 0 100%, 0 0);
+    -webkit-clip-path: polygon(95% 0, 100% 38%, 95% 100%, 0 100%, 0 0);
+    position: relative;
+    z-index: 1;
+    transition:100ms linear;
+    -webkit-transition:100ms linear;
+    background-image: linear-gradient(215deg, rgb(38, 95, 38), rgb(68, 167, 68));
+}
+
+#buttons>button div {
+    position: absolute;
+    display: inline;
+    top: 5px;
+    left: 5px;
+    width: 265px;
+    height: 80px;
+    text-align: right;
     font-size: 3rem;
     font-weight: bold;
     font-style: italic;
@@ -51,18 +80,29 @@ body {
     border: none;
     clip-path: polygon(95% 0, 100% 38%, 95% 100%, 0 100%, 0 0);
     -webkit-clip-path: polygon(95% 0, 100% 38%, 95% 100%, 0 100%, 0 0);
-    position: relative;
     z-index: 1;
     transition:100ms linear;
     -webkit-transition:100ms linear;
 }
 
-.active,
-#buttons>button:hover {
+#buttons>button text {
+    position: relative;
+    display: block;
+    top: 5px;
+}
+
+.active>div {
     background-color: var(--main-button-bg-hover-color) !important;
     color: var(--main-button-text-hover-color) !important;
+    width: var(--main-button-text-hover-width) !important;
+    background-color:rgb(68, 167, 68);
+}
+
+.active,
+#buttons>button:hover {
+    background-color: rgb(49, 119, 49) !important;
+    color: var(--main-button-hover-color) !important;
     width: var(--main-button-hover-width) !important;
-    text-align: var(--main-button-hover-align) !important;
 }
 
 #buttons>button:active {
@@ -92,25 +132,49 @@ body {
     height: 100%;
 }
 
+#progressParentParent {
+    height: 60px;
+    width: 650px;
+    background-color: rgb(38, 95, 38);
+    clip-path: polygon(1% 0, 100% 0, 99% 100%, 0 100%);
+    -webkit-clip-path: polygon(1% 0, 100% 0, 99% 100%, 0 100%);
+}
+
 #progressParent {
+    position: relative;
     height: 50px;
-    width: 100%;
+    top: 5px;
+    left: 5px;
+    width: 640px;
     background-color: var(--main-progress-background-color);
-    clip-path: polygon(2% 0, 98% 0, 100% 50%, 98% 100%, 2% 100%, 0% 50%);
-    -webkit-clip-path: polygon(2% 0, 98% 0, 100% 50%, 98% 100%, 2% 100%, 0% 50%);
+    clip-path: polygon(1% 0, 100% 0, 99% 100%, 0 100%);
+    -webkit-clip-path: polygon(1% 0, 100% 0, 99% 100%, 0 100%);
 }
 
 #progress {
     display: block;
     height: 100%;
     width: 10%;
-    background-color: var(--main-progress-foreground-color);
+    background-color: #74be95;
+    transition:50ms linear;
+    -webkit-transition:50ms linear;
 }
 
 #progressText {
     margin: 10px 0;
     color: var(--main-progress-text-color);
     font-size: 1.4rem;
+}
+
+#changelog {
+    display: block;
+    font-size: 2rem;
+    margin-left: 20px;
+    margin-top: 20px;
+}
+
+#changelogContents {
+    font-size: 1.5rem;
 }
 
 .grid-container {
@@ -120,12 +184,28 @@ body {
     align-items: center;
 }
 
-.grid-child1 {
+.sidebar {
     max-width: 384px;
     min-width: 384px;
 }
 
-.grid-child2 {
+.image-area {
     max-width: 896px;
     min-width: 896px;
+}
+
+li {
+    font-size: inherit;
+    margin-left: 40px;
+    list-style-type: disc;
+}
+
+a {
+    color: teal;
+    text-decoration: none;
+    pointer-events: none;
+}
+
+strong {
+    color: rgb(45, 167, 66)
 }

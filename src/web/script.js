@@ -1,6 +1,18 @@
 const LOCALHOST = "http://localhost";
 var AButtonHeld = [false, false, false, false];
 var activeMenu = "mainMenu";
+var frameDown = [0, 0, 0, 0];
+var frameUp = [0, 0, 0, 0];
+var counter = 0;
+
+var play_start_sfx;
+var play_move_sfx;
+
+function nx_log(message) {
+    // if (window.nx != undefined) {
+        window.nx.sendMessage("log:" + message);
+    // }
+}
 
 function updateBtnDesc(val) {
     document.getElementById("btn-desc").innerHTML = val;
@@ -18,6 +30,14 @@ function viewProgress() {
     document.getElementById("progress").style.width = '0%';
 }
 
+function viewChangelog(html) {
+    activeMenu = "changelog";
+    document.getElementById("mainMenu").style.display = 'none';
+    document.getElementById("progressSection").style.display = 'none';
+    document.getElementById("changelog").innerHTML = html;
+    document.getElementById("changelog").style.display = 'block';
+}
+
 function viewMainMenu() {
     activeMenu = "mainMenu";
     document.getElementById("mainMenu").style.display = 'block';
@@ -31,9 +51,7 @@ function updateProgress(info) {
 }
 
 function startHDR() {
-    // start
     window.nx.sendMessage("start");
-    window.location.href = `${LOCALHOST}/start`;
 }
 
 function versionSelect() {
@@ -94,7 +112,11 @@ function move(source, target) {
     source != undefined ? source.classList.remove("active") : false;
     target != undefined ? target.classList.add("active") : false;
     updateBtnDesc(target != undefined ? target.getAttribute("data-desc") : "No Description Avaliable");
-    updateBtnImg(item.getAttribute("data-img") != undefined ? item.getAttribute("data-img") : item.getAttribute("src"));
+    // updateBtnImg(item.getAttribute("data-img") != undefined ? item.getAttribute("data-img") : item.getAttribute("src"));
+    // if (play_move_sfx) {
+        play_move_sfx();
+    // }
+    // cursor_move.play();
 }
 
 function click() {
@@ -113,6 +135,7 @@ function checkGamepad(index, gamepad) {
     if (gamepad.buttons[1].pressed) {
         if (!AButtonHeld[index]) {
             AButtonHeld[index] = true;
+            play_start_sfx();
             document.querySelector("#buttons>button.active").click();
         }
     } else {
@@ -126,7 +149,14 @@ function checkGamepad(index, gamepad) {
 
     // Check if D-pad Up pressed or Y-Axis
     if (gamepad.buttons[12].pressed || axisY < -0.7) {
-        moveUp();
+        frameUp[index] = frameUp[index] % 8;
+        var should_move = frameUp[index] == 0;
+        frameUp[index] += 1;
+        if (should_move) {
+            moveUp();
+        }
+    } else {
+        frameUp[index] = 0;
     }
 
     // Check if D-pad Right pressed or X Axis > 0.7
@@ -136,11 +166,28 @@ function checkGamepad(index, gamepad) {
 
     // Check if D-pad Down pressed or Y Axis > 0.7
     if (gamepad.buttons[13].pressed || axisY > 0.7) {
-        moveDown();
-    };
+        frameDown[index] %= 8;
+        var should_move = frameDown[index] == 0;
+        frameDown[index] += 1;
+        if (should_move) {
+            moveDown();
+        }
+    } else {
+        frameDown[index] = 0;
+    }
+
+    counter %= 40;
+    if (counter == 0) {
+        nx_log("wakeup");
+    }
+    counter++;
 
     //#endregion
 }
+
+window.AudioContext = window.AudioContext || window.webkitAudioContext;
+
+var audioCtx = new window.webkitAudioContext();
 
 window.onload = () => {
     Array.from(document.querySelectorAll("#buttons>button")).forEach(item => {
@@ -149,6 +196,7 @@ window.onload = () => {
             item.classList.add("active");
             updateBtnDesc(item.getAttribute("data-desc") != undefined ? item.getAttribute("data-desc") : item.innerText);
             updateBtnImg(item.getAttribute("data-img") != undefined ? item.getAttribute("data-img") : item.getAttribute("src"));
+            play_move_sfx();
         });
     });
 
@@ -163,18 +211,27 @@ window.onload = () => {
     // Listen to the gamepadconnected event
     window.addEventListener("gamepadconnected", function(e) {
         // Once a gamepad has connected, start an interval function that will run every 100ms to check for input
+        nx_log("gamepadconnected");
         setInterval(function() {
             var gpl = navigator.getGamepads();
-            if (gpl.length > 0) {
+            if (gpl != undefined && gpl.length > 0) {
                 for (var i = 0; i < gpl.length; i++) {
                     checkGamepad(i, gpl[i]);
                 }
             }
-        }, 100);
+        }, 20);
     });
 
     window.nx.addEventListener("message", function(e) {
         var info = JSON.parse(e.data);
+        if ("contents" in info) {
+            if (info["contents"] === "exit") {
+                document.location.href = `${LOCALHOST}/start`;
+            }
+        }
+        // document.getElementById("progressSection").innerHTML = info.text;
+
+        // viewChangelog(info["text"]);
         updateProgress(info);
         if (info["completed"]) {
             viewMainMenu();
@@ -183,4 +240,46 @@ window.onload = () => {
 
     window.nx.footer.setAssign("B", "", () => {});
     window.nx.footer.setAssign("X", "", () => {});
+
+    var request = new XMLHttpRequest();
+    request.open('GET', './start.wav', true);
+    request.responseType = 'arraybuffer';
+    request.onload = function () {
+        nx_log("request 1 finished");
+        nx_log(request.response.byteLength);
+        audioCtx.decodeAudioData(request.response, function (buffer) {
+            nx_log("setting start");
+            play_start_sfx = function() {
+                nx_log("playing start");
+                var source = audioCtx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audioCtx.destination);
+                source.start(0);
+            };
+        }, function (error) {
+            nx_log("error:" + error);
+        });
+    };
+    request.send();
+
+    var request2 = new XMLHttpRequest();
+    request2.open('GET', 'cursor-move.wav', true);
+    request2.responseType = 'arraybuffer';
+    request2.onload = function() {
+        nx_log("request 2 finished");
+        nx_log(request2.response.byteLength);
+        audioCtx.decodeAudioData(request2.response, function (buffer) {
+            nx_log("bruh");
+            play_move_sfx = function() {
+                var source = audioCtx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audioCtx.destination);
+                source.start(0);
+                nx_log("move");
+            };
+        }, function (error) {
+            nx_log("error:" + error);
+        });
+    };
+    request2.send();
 }

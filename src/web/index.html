@@ -18,16 +18,26 @@
 
     <div id="mainMenu">
         <div  class="grid-container">
-            <div class="grid-child1">
+            <div class="sidebar">
                 <div id="buttons">
-                    <button onclick="startHDR();" class="active" data-desc="Play HDR. A copy of Super Smash Bros. Ultimate is required." data-img="logo.png">Play</button>
-                    <button onclick="updateHDR();" data-desc="Update HDR to the latest version." data-img="logo.png">Update</button>
-                    <button onclick="versionSelect();" data-desc="Select which version of HDR to change to." data-img="logo.png">Versions</button>
-                    <button onclick="verifyHDR();" data-desc="Verify your current installation of HDR." data-img="logo.png">Verify</button>
-                    <button onclick="exit();" data-desc="Exit to the Home Menu." data-img="logo.png">Exit</button>
+                    <button onclick="startHDR();" class="active" data-desc="Launch HewDraw Remix" data-img="logo.png" nx-se-disabled="">
+                        <div><text>Play&nbsp;&nbsp;</text></div>
+                    </button>
+                    <button onclick="updateHDR();" data-desc="Update HDR to the latest version." data-img="logo.png" nx-se-disabled="">
+                        <div><text>Update&nbsp;&nbsp;</text></div>
+                    </button>
+                    <button onclick="versionSelect();" data-desc="Select which version of HDR to play." data-img="logo.png" nx-se-disabled="">
+                        <div><text>Versions&nbsp;&nbsp;</text></div>
+                    </button>
+                    <button onclick="verifyHDR();" data-desc="Verify your current installation of HDR." data-img="logo.png" nx-se-disabled="">
+                        <div><text>Verify&nbsp;&nbsp;</text></div>
+                    </button>
+                    <button onclick="exit();" data-desc="Exit to the Home Menu." data-img="logo.png" nx-se-disabled="">
+                        <div><text>Exit&nbsp;&nbsp;</text></div>
+                    </button>
                 </div>
             </div>
-            <div class="grid-child2">
+            <div class="image-area">
                 <img id="btn-img" src="logo.png" width="90%" style="max-height:500px">
             </div>
         </div>
@@ -38,13 +48,17 @@
     </div>
 
     <div id="progressSection">
-        <div style="width: 50%; text-align: center;">
-            <div id="progressParent">
-                <div id="progress"></div>
+        <div style="width: 650px; text-align: center;">
+            <div id="progressParentParent">
+                <div id="progressParent">
+                    <div id="progress"></div>
+                </div>
             </div>
             <p id="progressText">Loading...</p>
         </div>
     </div>
+
+    <div id="changelog"></div>
 </body>
 
 </html>
