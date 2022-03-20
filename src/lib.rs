@@ -104,20 +104,14 @@ struct EndCommand {
 
 pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>) {
     signal.send(AsyncCommand::ChangeVolumeOverTime { new_volume: 0.0, time: 1.6 });
-    thread::sleep(time::Duration::from_millis(1600));
-    // if session.try_send_json(&EndCommand {
-    //     contents: "begin_end".to_string()
-    // })
-    // {
-    //     thread::sleep(time::Duration::from_millis(1000));
-    // }
-
+    
     signal.send(AsyncCommand::Quit);
     session.send_json(&EndCommand {
         contents: "exit".to_string()
     });
 
-    session.wait_for_exit();
+    println!("exiting session");
+    session.exit();
 }
 
 
@@ -157,7 +151,7 @@ pub fn update_hdr(session: &WebSession) {
     unsafe {
         skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 2);
     }
-    curl::try_curl("https://api.github.com/repos/HDR-Development/HDR-Releases/releases/assets/59031292", &mut writer, session, tx);
+    curl::try_curl("https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/package.zip", &mut writer, session, tx);
     // curl::try_curl("http://192.168.0.113:8080/HewDraw.Remix.v0.3.7-beta.SWITCH.zip", &mut writer, session);
 
     drop(writer);
@@ -316,6 +310,7 @@ pub fn main() {
                         });
                     }
                     "start" => {
+                        println!("starting hdr...");
                         end_session_and_launch(&session, signal);
                         break;
                     }
@@ -323,6 +318,7 @@ pub fn main() {
                     "update_hdr" => update_hdr(&session),
                     "version_select" => verify_hdr(&session),
                     "exit" => {
+                        println!("exiting!");
                         unsafe { skyline::nn::oe::ExitApplication() }
                     },
                     x if x.starts_with("log:") => {

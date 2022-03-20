@@ -222,6 +222,9 @@ function updateProgressByExtraction(extract_info) {
     progress_bar.style.width = `${progress * 100}%`;
     progress_bar.style.backgroundColor = "var(--main-button-bg-hover-color)";
     document.getElementById("progressText").innerHTML = `Extracting '${extract_info["file_name"]}<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
+    if (progress == 1.0) {
+        viewMainMenu();
+    }
 }
 
 window.onload = () => {
