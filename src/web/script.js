@@ -189,6 +189,41 @@ window.AudioContext = window.AudioContext || window.webkitAudioContext;
 
 var audioCtx = new window.webkitAudioContext();
 
+function formatBPS(bps) {
+    var suffix = "bps";
+    if (bps > (1024 * 1024)) {
+        bps /= (1024 * 1024);
+        suffix = "mbps";
+    } else if (bps > 1024) {
+        bps /= 1024;
+        suffix = "kbps";
+    }
+    return bps.toFixed(2) + " " + suffix;
+}
+
+function updateProgressByDownload(download_info) {
+    if (download_info["tag"] !== "download-update") return;
+
+    var bps = formatBPS(download_info["bps"]);
+    var progress = download_info["bytes_downloaded"] / download_info["total_bytes"];
+    var progress_bar = document.getElementById("progress");
+    progress_bar.style.backgroundColor = "var(--main-progress-download-color)";
+    progress_bar.style.width = `${progress * 100}%`;
+    document.getElementById("progressText").innerHTML = `Downloading ${download_info["item_name"]}... ${bps}<br>${download_info["bytes_downloaded"]} / ${download_info["total_bytes"]}`;
+}
+
+function updateProgressByExtraction(extract_info) {
+    if (extract_info["tag"] !== "extract-update") return;
+
+
+    document.getElementById("progressParent").style.backgroundColor = "var(--main-progress-download-color)";
+    var progress = (extract_info["file_number"] + 1) / extract_info["file_count"];
+    var progress_bar = document.getElementById("progress");
+    progress_bar.style.width = `${progress * 100}%`;
+    progress_bar.style.backgroundColor = "var(--main-button-bg-hover-color)";
+    document.getElementById("progressText").innerHTML = `Extracting '${extract_info["file_name"]}<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
+}
+
 window.onload = () => {
     Array.from(document.querySelectorAll("#buttons>button")).forEach(item => {
         item.addEventListener("mouseover", () => {
@@ -224,19 +259,28 @@ window.onload = () => {
 
     window.nx.addEventListener("message", function(e) {
         var info = JSON.parse(e.data);
-        if ("contents" in info) {
-            if (info["contents"] === "exit") {
-                document.location.href = `${LOCALHOST}/start`;
-            }
+        if (!("tag" in info)) {
+            return;
+        }
+
+        if (info["tag"] === "download-update") {
+            updateProgressByDownload(info);
+        } else if (info["tag"] === "versioning") {
+            var versioning_string = `HDR | Code: ${info["code"]} | Assets: ${info["romfs"]}`;
+            document.getElementById("title").innerHTML = versioning_string;
+        } else if (info["tag"] === "extract-update") {
+            updateProgressByExtraction(info);
         }
         // document.getElementById("progressSection").innerHTML = info.text;
 
         // viewChangelog(info["text"]);
-        updateProgress(info);
+        // updateProgress(info);
         if (info["completed"]) {
             viewMainMenu();
         }
     });
+
+    window.nx.sendMessage("load");
 
     window.nx.footer.setAssign("B", "", () => {});
     window.nx.footer.setAssign("X", "", () => {});

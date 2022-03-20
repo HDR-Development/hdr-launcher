@@ -12,12 +12,20 @@ crate-type = ["cdylib"]
 
 [dependencies]
 skyline = { git = "https://github.com/ultimate-research/skyline-rs.git" }
+# skyline = { path = "../../skyline-rs" }
 skyline-web = { git = "https://github.com/skyline-rs/skyline-web" }
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 pulldown-cmark = "0.9.1"
 hound = "3.4.0"
-zip = "0.5.13"
+zip = { version = "0.5.13", default-features = false, features = ["deflate"] }
+minreq = { version = "=2.2.1", features = ["https-rustls"] }
+semver = "1.0.6"
+curl-sys = { path = "../curl-rust/curl-sys", default-features = false }
+
+[patch.crates-io]
+ring = { git = "https://github.com/skyline-rs/ring", branch = "0.16.20" }
+webpki = { git = "https://github.com/skyline-rs/webpki" }
 
 [profile.dev]
 panic = "abort"
