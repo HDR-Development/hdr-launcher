@@ -6,12 +6,12 @@
 #![allow(dead_code)]
 #![feature(c_variadic)]
 mod audio;
-mod github;
+// mod github;
 mod looping_audio;
 mod unzipper;
 mod curl;
 
-use github::GithubRelease;
+// use github::GithubRelease;
 use hound::WavReader;
 use looping_audio::{LoopingAudio, AsyncCommand};
 use semver::Version;
@@ -121,11 +121,11 @@ pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>
 }
 
 
-pub fn update_hdr(session: &WebSession, betas: &Vec<GithubRelease>) {
+pub fn update_hdr(session: &WebSession) {
 
-    let name = betas[0].assets[1].name.as_str();
-    let release_url = betas[0].assets[1].api_url.as_str();
-    let total_size = betas[0].assets[1].size;
+    // let name = betas[0].assets[1].name.as_str();
+    // let release_url = betas[0].assets[1].api_url.as_str();
+    // let total_size = betas[0].assets[1].size;
 
 
     let session2 = session as *const WebSession as u64;
@@ -260,14 +260,14 @@ pub fn main() {
         );
     }));
 
-    let (nightly_plugins, nightly_romfs, betas) = std::thread::Builder::new()
-        .stack_size(0x40_000)
-        .spawn(|| {
-            let plugins = github::get_all_releases_for_repository("HDR-Development", "HewDraw-Remix").unwrap();
-            let romfs = github::get_all_releases_for_repository("HDR-Development", "romfs-release").unwrap();
-            let betas = github::get_all_releases_for_repository("HDR-Development", "HDR-Releases").unwrap();
-            (plugins, romfs, betas)
-        }).unwrap().join().unwrap();
+    // let (nightly_plugins, nightly_romfs, betas) = std::thread::Builder::new()
+    //     .stack_size(0x40_000)
+    //     .spawn(|| {
+    //         let plugins = github::get_all_releases_for_repository("HDR-Development", "HewDraw-Remix").unwrap();
+    //         let romfs = github::get_all_releases_for_repository("HDR-Development", "romfs-release").unwrap();
+    //         let betas = github::get_all_releases_for_repository("HDR-Development", "HDR-Releases").unwrap();
+    //         (plugins, romfs, betas)
+    //     }).unwrap().join().unwrap();
 
     let mut wav = WavReader::new(std::io::Cursor::new(BGM_WAV)).unwrap();
     let samples: Vec<i16> = wav.samples::<i16>().map(|x| x.unwrap()).collect();
@@ -320,7 +320,7 @@ pub fn main() {
                         break;
                     }
                     "verify_hdr" => verify_hdr(&session),
-                    "update_hdr" => update_hdr(&session, &nightly_plugins),
+                    "update_hdr" => update_hdr(&session),
                     "version_select" => verify_hdr(&session),
                     "exit" => {
                         unsafe { skyline::nn::oe::ExitApplication() }
