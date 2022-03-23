@@ -112,6 +112,7 @@ pub fn try_curl(
         assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_USERAGENT, "HDR-Launcher\0".as_ptr()), curl_sys::CURLE_OK);
         START_TICK = skyline::nn::os::GetSystemTick() as usize;
         assert_eq!(easy_perform(curl), curl_sys::CURLE_OK);
+        easy_cleanup(curl);
     }
 }
 

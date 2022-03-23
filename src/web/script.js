@@ -222,9 +222,17 @@ function updateProgressByExtraction(extract_info) {
     progress_bar.style.width = `${progress * 100}%`;
     progress_bar.style.backgroundColor = "var(--main-button-bg-hover-color)";
     document.getElementById("progressText").innerHTML = `Extracting '${extract_info["file_name"]}<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
-    if (progress == 1.0) {
-        viewMainMenu();
-    }
+}
+
+function updateProgressByVerify(extract_info) {
+    if (extract_info["tag"] !== "verify-install") return;
+
+    document.getElementById("progressParent").style.backgroundColor = "var(--main-progress-download-color)";
+    var progress = (extract_info["file_number"] + 1) / extract_info["file_count"];
+    var progress_bar = document.getElementById("progress");
+    progress_bar.style.width = `${progress * 100}%`;
+    progress_bar.style.backgroundColor = "var(--main-button-bg-hover-color)";
+    document.getElementById("progressText").innerHTML = `Verifying '${extract_info["file_name"]}'<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
 }
 
 window.onload = () => {
@@ -273,6 +281,9 @@ window.onload = () => {
             document.getElementById("title").innerHTML = versioning_string;
         } else if (info["tag"] === "extract-update") {
             updateProgressByExtraction(info);
+        }
+        else if (info["tag"] === "verify-install") {
+            updateProgressByVerify(info);
         }
         // document.getElementById("progressSection").innerHTML = info.text;
 
