@@ -6,6 +6,8 @@
 #![allow(dead_code)]
 #![feature(c_variadic)]
 mod audio;
+mod commands;
+mod config;
 // mod github;
 mod looping_audio;
 mod unzipper;
@@ -146,34 +148,25 @@ struct EndCommand {
 pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>) {
     signal.send(AsyncCommand::ChangeVolumeOverTime { new_volume: 0.0, time: 1.6 });
     
-    signal.send(AsyncCommand::Quit);
-    session.send_json(&EndCommand {
-        contents: "exit".to_string()
-    });
+    std::thread::sleep(std::time::Duration::from_millis(1500));
 
-    println!("exiting session");
-    session.exit();
+    signal.send(AsyncCommand::Quit);
+    session.send_json(&commands::Start::new());
+    session.wait_for_exit();
 }
 
-
-pub fn update_hdr(session: &WebSession) {
-
-    // let name = betas[0].assets[1].name.as_str();
-    // let release_url = betas[0].assets[1].api_url.as_str();
-    // let total_size = betas[0].assets[1].size;
-
-    
-
-    let session2 = session as *const WebSession as u64;
+fn download_file(url: &str, path: &str, session: &WebSession) -> std::io::Result<()> {
     let mut writer = std::io::BufWriter::with_capacity(
         0x40_0000,
-        std::fs::File::create("sd:/download.zip").unwrap()
+        std::fs::File::create(path)?
     );
+
+    let session2 = session as *const WebSession as u64;
+
     let (tx, rx) = mpsc::channel();
     let ui_updater = std::thread::spawn(move || {
         let session = unsafe { &*(session2 as *const WebSession) };
         loop {
-
             let mut value = None;
             loop {
                 match rx.try_recv() {
@@ -190,15 +183,50 @@ pub fn update_hdr(session: &WebSession) {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
     });
+
     unsafe {
         skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 2);
     }
-    curl::try_curl("https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/package.zip", &mut writer, session, tx);
-    // curl::try_curl("http://192.168.0.113:8080/HewDraw.Remix.v0.3.7-beta.SWITCH.zip", &mut writer, session);
 
-    drop(writer);
+    curl::try_curl(url, &mut writer, session, tx).unwrap();
 
-    let mut zip = unzipper::get_zip_archive("sd:/download.zip").unwrap();
+    // unsafe {
+    //     skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 16);
+    // }
+
+    ui_updater.join();
+
+    Ok(())
+}
+
+pub fn restart(session: &WebSession, signal: Sender<AsyncCommand>) {
+    signal.send(AsyncCommand::ChangeVolumeOverTime { new_volume: 0.0, time: 1.6 });
+    
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+
+    signal.send(AsyncCommand::Quit);
+    session.send_json(&commands::Restart::new());
+    session.wait_for_exit();
+    unsafe {
+        skyline::nn::oe::RequestToRelaunchApplication();
+    }
+}
+
+pub fn update_hdr(session: &WebSession, is_nightly: bool) {
+
+    // check if the file exists, could exist due to extraction failure
+    if !Path::new("sd:/hdr-update.zip").exists() {
+        let url = if is_nightly {
+            "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/package.zip"
+            // "http://192.168.0.113:8000/package23.zip"
+        } else {
+            "https://github.com/HDR-Development/HDR-Releases/releases/latest/download/package.zip"
+        };
+
+        download_file(url, "sd:/hdr-update.zip", session).unwrap();
+    }
+
+    let mut zip = unzipper::get_zip_archive("sd:/hdr-update.zip").unwrap();
 
     let count = zip.len();
 
@@ -214,16 +242,18 @@ pub fn update_hdr(session: &WebSession) {
             file.name()
         ));
 
+        let path = Path::new("sd:/").join(file.name());
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent);
+        }
+
         let mut file_data = vec![];
         file.read_to_end(&mut file_data).unwrap();
-        std::fs::write(Path::new("sd:/").join(file.name()), file_data).unwrap();
+        std::fs::write(path, file_data).unwrap();
     }
 
-    unsafe {
-        skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 16);
-    }
-
-    session.send_json(&Info::new(1.0, "completed", true));
+    session.send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));
+    session.send_json(&commands::ChangeMenu::new("main-menu"));
 }
 
 pub fn verify_hdr(session: &WebSession){
@@ -278,6 +308,10 @@ pub fn get_plugin_version() -> Option<Version> {
 
 #[skyline::main(name = "HDRLauncher")]
 pub fn main() {
+    let mut config = config::get_config();
+    if config::is_enable_skip_launcher(&mut config) {
+        return;
+    }
     // let handle = start_audio_thread();
     curl::install();
 
@@ -300,15 +334,6 @@ pub fn main() {
         );
     }));
 
-    // let (nightly_plugins, nightly_romfs, betas) = std::thread::Builder::new()
-    //     .stack_size(0x40_000)
-    //     .spawn(|| {
-    //         let plugins = github::get_all_releases_for_repository("HDR-Development", "HewDraw-Remix").unwrap();
-    //         let romfs = github::get_all_releases_for_repository("HDR-Development", "romfs-release").unwrap();
-    //         let betas = github::get_all_releases_for_repository("HDR-Development", "HDR-Releases").unwrap();
-    //         (plugins, romfs, betas)
-    //     }).unwrap().join().unwrap();
-
     let mut wav = WavReader::new(std::io::Cursor::new(BGM_WAV)).unwrap();
     let samples: Vec<i16> = wav.samples::<i16>().map(|x| x.unwrap()).collect();
     let audio = LoopingAudio::new(
@@ -316,6 +341,7 @@ pub fn main() {
         151836 * 2,
         1776452 * 2,
         0.5,
+        0.0,
         30,
         3.0
     );
@@ -360,8 +386,12 @@ pub fn main() {
                         end_session_and_launch(&session, signal);
                         break;
                     }
+                    "restart" => {
+                        restart(&session, signal);
+                        break;
+                    }
                     "verify_hdr" => verify_hdr(&session),
-                    "update_hdr" => update_hdr(&session),
+                    "update_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config)),
                     "version_select" => verify_hdr(&session),
                     "exit" => {
                         println!("exiting!");

@@ -51,7 +51,21 @@ function updateProgress(info) {
 }
 
 function startHDR() {
+    if (document.getElementById("play-button").innerHTML.includes("Restart")) {
+        window.nx.sendMessage("restart");
+        return;
+    }
     window.nx.sendMessage("start");
+    document.getElementById("title").style.display = "hidden";
+    document.getElementById("mainMenu").style.display = "hidden";
+}
+
+function startGame() {
+    window.location.href = `${LOCALHOST}/start`;
+}
+
+function restartGame() {
+    window.location.href = `${LOCALHOST}/restart`;
 }
 
 function versionSelect() {
@@ -235,6 +249,20 @@ function updateProgressByVerify(extract_info) {
     document.getElementById("progressText").innerHTML = `Verifying '${extract_info["file_name"]}'<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
 }
 
+function changeMenuByCommand(change_menu) {
+    if (change_menu["tag"] !== "change-menu") return;
+
+    if (change_menu["going_to"] === "main-menu") {
+        viewMainMenu();
+    }
+}
+
+function changeHtml(change_html) {
+    if (change_html["tag"] !== "change-html") return;
+
+    document.getElementById(change_html["id"]).innerHTML = change_html["text"];
+}
+
 window.onload = () => {
     Array.from(document.querySelectorAll("#buttons>button")).forEach(item => {
         item.addEventListener("mouseover", () => {
@@ -281,9 +309,18 @@ window.onload = () => {
             document.getElementById("title").innerHTML = versioning_string;
         } else if (info["tag"] === "extract-update") {
             updateProgressByExtraction(info);
-        }
-        else if (info["tag"] === "verify-install") {
+        } else if (info["tag"] === "verify-install") {
             updateProgressByVerify(info);
+        } else if (info["tag"] === "start-game") {
+            startGame();
+        } else if (info["tag"] === "restart-game") {
+            restartGame();   
+        } else if (info["tag"] === "exit-launcher") {
+            exit();
+        } else if (info["tag"] === "change-menu") {
+            changeMenuByCommand(info);
+        } else if (info["tag"] === "change-html") {
+            changeHtml(info);
         }
         // document.getElementById("progressSection").innerHTML = info.text;
 

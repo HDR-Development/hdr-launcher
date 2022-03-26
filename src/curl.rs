@@ -88,32 +88,46 @@ unsafe extern "C" fn progress_func(session: &WebSession, dl_total: f64, dl_now: 
     0
 }
 
+macro_rules! curle {
+    ($e:expr) => {{
+        let result = $e;
+        if result != ::curl_sys::CURLE_OK {
+            Err(result)
+        } else {
+            Ok(())
+        }
+    }}
+}
+
 pub fn try_curl(
     url: &str,
     writer: &mut BufWriter<File>,
     session: &WebSession,
     mut sender: Sender<DownloadInfo>
-) {
+) -> Result<(), u32> {
     unsafe {
         SENDER = Some(std::mem::transmute(&mut sender as *mut Sender<DownloadInfo>));
-        assert_eq!(global_init_mem(3, malloc, free, realloc, strdup, calloc), curl_sys::CURLE_OK);
+        // assert_eq!(global_init_mem(3, malloc, free, realloc, strdup, calloc), curl_sys::CURLE_OK);
         let ptr = [url, "\0"].concat();
         let curl = easy_init();
         let header = slist_append(std::ptr::null_mut(), "Accept: application/octet-stream\0".as_ptr());
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_URL, ptr.as_str().as_ptr()), curl_sys::CURLE_OK);
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_HTTPHEADER, header), curl_sys::CURLE_OK);
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_FOLLOWLOCATION, 1u64), curl_sys::CURLE_OK);
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_WRITEDATA, writer), curl_sys::CURLE_OK);
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_WRITEFUNCTION, write_fn as *const ()), curl_sys::CURLE_OK);
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_NOPROGRESS, 0u64), curl_sys::CURLE_OK);
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_PROGRESSDATA, session), curl_sys::CURLE_OK);
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_PROGRESSFUNCTION, progress_func as *const ()), curl_sys::CURLE_OK);
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_SSL_CTX_FUNCTION, curl_ssl_ctx_callback as *const ()), curl_sys::CURLE_OK);
-        assert_eq!(easy_setopt(curl, curl_sys::CURLOPT_USERAGENT, "HDR-Launcher\0".as_ptr()), curl_sys::CURLE_OK);
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_URL, ptr.as_str().as_ptr()))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_HTTPHEADER, header))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_FOLLOWLOCATION, 1u64))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEDATA, writer))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEFUNCTION, write_fn as *const ()))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_NOPROGRESS, 0u64))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_PROGRESSDATA, session))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_PROGRESSFUNCTION, progress_func as *const ()))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_SSL_CTX_FUNCTION, curl_ssl_ctx_callback as *const ()))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_USERAGENT, "HDR-Launcher\0".as_ptr()))?;
         START_TICK = skyline::nn::os::GetSystemTick() as usize;
-        assert_eq!(easy_perform(curl), curl_sys::CURLE_OK);
+        curle!(easy_perform(curl))?;
+        curle!(easy_cleanup(curl))?;
         easy_cleanup(curl);
     }
+
+    Ok(())
 }
 
 pub fn install() {

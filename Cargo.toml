@@ -1,7 +1,7 @@
 [package]
 name = "HDRLauncher"
 version = "0.1.0"
-authors = ["Ali Hussain (Coolsonickirby/Random) <alihussain2001@gmail.com>"]
+authors = ["HDR Development Team"]
 edition = "2018"
 
 [package.metadata.skyline]
@@ -11,15 +11,14 @@ titleid = "01006A800016E000"
 crate-type = ["cdylib"]
 
 [dependencies]
+skyline-config = { git = "https://github.com/skyline-rs/skyline-config" }
 skyline = { git = "https://github.com/ultimate-research/skyline-rs.git" }
-# skyline = { path = "../../skyline-rs" }
 skyline-web = { git = "https://github.com/skyline-rs/skyline-web" }
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 pulldown-cmark = "0.9.1"
 hound = "3.4.0"
 zip = { version = "0.5.13", default-features = false, features = ["deflate"] }
-# minreq = { version = "=2.2.1", features = ["https-rustls"] }
 semver = "1.0.6"
 curl-sys = { path = "../curl-rust/curl-sys", default-features = false }
 
