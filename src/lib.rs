@@ -188,6 +188,7 @@ fn download_file(url: &str, path: &str, session: &WebSession) -> std::io::Result
         skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 2);
     }
 
+    println!("trying curl with url: {}", url);
     curl::try_curl(url, &mut writer, session, tx).unwrap();
 
     // unsafe {
@@ -213,9 +214,18 @@ pub fn restart(session: &WebSession, signal: Sender<AsyncCommand>) {
 }
 
 pub fn update_hdr(session: &WebSession, is_nightly: bool) {
+    println!("beginning update!");
+
+    // if the file exists but is empty, remove it
+    if Path::new("sd:/hdr-update.zip").exists() && std::fs::metadata("sd:/hdr-update.zip").unwrap().len() < 1000 {
+        // todo: get hash of zip and verify the existing zip is valid, else delete it, rather than using file size (lol)
+        println!("removing invalid hdr-update.zip, of size {}", std::fs::metadata("sd:/hdr-update.zip").unwrap().len());
+        std::fs::remove_file("sd:/hdr-update.zip");
+    }
 
     // check if the file exists, could exist due to extraction failure
     if !Path::new("sd:/hdr-update.zip").exists() {
+        println!("we need to download the hdr update. is_nightly = {}", is_nightly);
         let url = if is_nightly {
             "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/package.zip"
             // "http://192.168.0.113:8000/package23.zip"
@@ -224,6 +234,9 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         };
 
         download_file(url, "sd:/hdr-update.zip", session).unwrap();
+        println!("download complete.");
+    }else {
+        println!("dont need to download hdr update since there was a zip already on sd...");
     }
 
     let mut zip = unzipper::get_zip_archive("sd:/hdr-update.zip").unwrap();
@@ -250,6 +263,12 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         let mut file_data = vec![];
         file.read_to_end(&mut file_data).unwrap();
         std::fs::write(path, file_data).unwrap();
+    }
+
+    // delete the update zip
+    if Path::new("sd:/hdr-update.zip").exists() {
+        println!("removing hdr-update.zip, of size {}", std::fs::metadata("sd:/hdr-update.zip").unwrap().len());
+        std::fs::remove_file("sd:/hdr-update.zip");
     }
 
     session.send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));
@@ -368,7 +387,7 @@ pub fn main() {
             .boot_display(skyline_web::BootDisplay::Black)
             .open_session(skyline_web::Visibility::InitiallyHidden).unwrap();
         
-        session.show();
+        
 
         let signal = audio.start();
 
@@ -376,10 +395,17 @@ pub fn main() {
             if let Some(msg) = session.try_recv() {
                 match msg.as_str() {
                     "load" => {
+                        let plugin_version = get_plugin_version().map(|x| x.to_string()).unwrap_or("???".to_string());
+                        let romfs_version = get_romfs_version().map(|x| x.to_string()).unwrap_or("???".to_string());
                         session.send_json(&VersionInfo {
-                            code: get_plugin_version().map(|x| x.to_string()).unwrap_or("???".to_string()),
-                            romfs: get_romfs_version().map(|x| x.to_string()).unwrap_or("???".to_string())
+                            code: plugin_version.clone(),
+                            romfs: romfs_version.clone()
                         });
+                        if !Path::new("sd:/ultimate/mods/hdr").exists() {
+                            session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Install&nbsp;&nbsp;</text></div>"));
+                            session.send_json(&commands::ChangeHtml::new("play-button", "<div><text>Vanilla&nbsp;&nbsp;</text></div>"));
+                            session.send_json(&commands::ChangeMenu::new("main-menu"));
+                        }
                     }
                     "start" => {
                         println!("starting hdr...");
