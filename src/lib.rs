@@ -227,10 +227,10 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
     if !Path::new("sd:/hdr-update.zip").exists() {
         println!("we need to download the hdr update. is_nightly = {}", is_nightly);
         let url = if is_nightly {
-            "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/package.zip"
+            "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/switch-package.zip"
             // "http://192.168.0.113:8000/package23.zip"
         } else {
-            "https://github.com/HDR-Development/HDR-Releases/releases/latest/download/package.zip"
+            "https://github.com/HDR-Development/HDR-Releases/releases/latest/download/switch-package.zip"
         };
 
         download_file(url, "sd:/hdr-update.zip", session).unwrap();
