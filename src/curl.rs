@@ -81,7 +81,7 @@ unsafe extern "C" fn progress_func(session: &WebSession, dl_total: f64, dl_now: 
     let seconds_f = (nanoseconds as f64) / (1000.0 * 1000.0 * 1000.0);
     let bps = dl_now * 8.0 / seconds_f;
 
-    (**(SENDER.as_ref().unwrap())).send(crate::DownloadInfo::new(bps, dl_now, dl_total, "release archive"));
+    (**(SENDER.as_ref().unwrap())).send(crate::DownloadInfo::new(bps, dl_now, dl_total, ""));
     // println!("{} / {} | {} mbps", dl_now, dl_total, bps / (1024.0 * 1024.0));
 
     // session.send_json(&crate::DownloadInfo::new(bps, dl_now, dl_total, "release archive"));

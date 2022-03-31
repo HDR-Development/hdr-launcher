@@ -25,25 +25,46 @@ impl<'a> ExtractInfo<'a> {
 }
 
 #[derive(Serialize, Debug)]
-pub struct VerifyInfo<'a> {
+pub struct VerifyInfo {
     pub tag: &'static str,
     pub file_number: usize,
     pub file_count: usize,
-    pub file_name: &'a str,
+    pub file_name: String
 }
 
-impl<'a> VerifyInfo<'a> {
+impl VerifyInfo {
     pub fn new(
         file_number: usize,
         file_count: usize,
-        file_name: &'a str
+        file_name: String
     ) -> Self
     {
         Self {
-            tag: "extract-update",
+            tag: "verify-install",
             file_number,
             file_count,
             file_name
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+pub struct SetOptionStatus<'a> {
+    pub tag: &'static str,
+    pub option: &'a str,
+    pub status: bool,
+}
+
+impl<'a> SetOptionStatus<'a> {
+    pub fn new(
+        option: &'a str,
+        status: bool
+    ) -> Self
+    {
+        Self {
+            tag: "set-option",
+            option,
+            status
         }
     }
 }

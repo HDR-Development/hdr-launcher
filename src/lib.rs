@@ -20,7 +20,7 @@ use looping_audio::{LoopingAudio, AsyncCommand};
 use semver::Version;
 // use skyline::{hook, install_hook};
 use skyline_web::{Webpage, WebSession};
-use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write, BufRead}, path::Path};
+use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write, BufRead}, path::{Path, PathBuf}};
 use serde::{Serialize, Deserialize};
 use util::*;
 
@@ -31,7 +31,22 @@ static LOGO_PNG: &[u8] = include_bytes!("./web/logo.png");
 static TEST_MARKDOWN: &str = include_str!("./web/test.md");
 static START_WAV: &[u8] = include_bytes!("./web/start.wav");
 static CURSOR_MOVE_WAV: &[u8] = include_bytes!("./web/cursor-move.wav");
+static FAILURE_WAV: &[u8] = include_bytes!("./web/failure.wav");
 static BGM_WAV: &[u8] = include_bytes!("./web/bgm.wav");
+
+extern "C" {
+    #[link_name = "_ZN2nn2oe23BeginBlockingHomeButtonEv"]
+    fn block_home_button();
+
+    #[link_name = "_ZN2nn2oe35BeginBlockingHomeButtonShortPressedEv"]
+    fn block_home_button_short();
+
+    #[link_name = "_ZN2nn2oe21EndBlockingHomeButtonEv"]
+    fn allow_home_button();
+
+    #[link_name = "_ZN2nn2oe33EndBlockingHomeButtonShortPressedEv"]
+    fn allow_home_button_short();
+}
 
 #[global_allocator]
 static SMASH_ALLOCATOR: skyline::unix_alloc::UnixAllocator = skyline::unix_alloc::UnixAllocator;
@@ -90,30 +105,6 @@ impl<'a> ExtractInfo<'a> {
 }
 
 #[derive(Serialize, Debug)]
-struct VerifyInfo<'a> {
-    pub tag: &'static str,
-    pub file_number: usize,
-    pub file_count: usize,
-    pub file_name: &'a str
-}
-
-impl<'a> VerifyInfo<'a> {
-    pub fn new(
-        file_number: usize,
-        file_count: usize,
-        file_name: &'a str
-    ) -> Self
-    {
-        Self {
-            tag: "verify-install",
-            file_number,
-            file_count,
-            file_name
-        }
-    }
-}
-
-#[derive(Serialize, Debug)]
 pub struct DownloadInfo<'a> {
     pub tag: &'static str,
     pub bps: f64,
@@ -157,7 +148,11 @@ pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>
     session.wait_for_exit();
 }
 
-fn download_file(url: &str, path: &str, session: &WebSession) -> std::io::Result<()> {
+fn download_file(url: &str, path: &str, session: &WebSession, file_name: String) -> std::io::Result<()> {
+    // unsafe {
+    //     block_home_button();
+    //     block_home_button_short();
+    // }
     println!("downloading from: {}", url);
     let mut writer = std::io::BufWriter::with_capacity(
         0x40_0000,
@@ -170,7 +165,7 @@ fn download_file(url: &str, path: &str, session: &WebSession) -> std::io::Result
     let ui_updater = std::thread::spawn(move || {
         let session = unsafe { &*(session2 as *const WebSession) };
         loop {
-            let mut value = None;
+            let mut value: Option<DownloadInfo> = None;
             loop {
                 match rx.try_recv() {
                     Ok(v) => value = Some(v),
@@ -179,8 +174,9 @@ fn download_file(url: &str, path: &str, session: &WebSession) -> std::io::Result
                 }
             }
 
-            if let Some(value) = value {
-                session.send_json(&value);
+            if let Some(mut value) = value {
+                value.item_name = file_name.as_str();
+                println!("{}", session.try_send_json(&value));
             }
 
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -202,6 +198,11 @@ fn download_file(url: &str, path: &str, session: &WebSession) -> std::io::Result
 
     ui_updater.join();
 
+    // unsafe {
+    //     allow_home_button();
+    //     allow_home_button_short();
+    // }
+
     Ok(())
 }
 
@@ -222,7 +223,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
     println!("beginning update!");
 
     // if the file exists but is empty, remove it
-    if Path::new("sd:/hdr-update.zip").exists() && std::fs::metadata("sd:/hdr-update.zip").unwrap().len() < 1000 {
+    if Path::new("sd:/hdr-update.zip").exists() && std::fs::metadata("sd:/hdr-update.zip").unwrap().len() < 100 {
         // todo: get hash of zip and verify the existing zip is valid, else delete it, rather than using file size (lol)
         println!("removing invalid hdr-update.zip, of size {}", std::fs::metadata("sd:/hdr-update.zip").unwrap().len());
         std::fs::remove_file("sd:/hdr-update.zip");
@@ -238,10 +239,20 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
             "https://github.com/HDR-Development/HDR-Releases/releases/latest/download/switch-package.zip"
         };
 
-        download_file(url, "sd:/hdr-update.zip", session).unwrap();
-        
-    }else {
+        download_file(url, "sd:/hdr-update.zip", session, "release archive".to_string()).unwrap();  
+    } else {
         println!("dont need to download hdr update since there was a zip already on sd...");
+    }
+
+    if !Path::new("sd:/hdr-changelog.md").exists() {
+        let url = if is_nightly {
+            "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/CHANGELOG.md"
+            // "http://192.168.0.113:8000/package23.zip"
+        } else {
+            "https://github.com/HDR-Development/HDR-Releases/releases/latest/download/CHANGELOG.md"
+        };
+
+        download_file(url, "sd:/hdr-changelog.md", session, "release changelog".to_string()).unwrap();
     }
 
     let mut zip = unzipper::get_zip_archive("sd:/hdr-update.zip").unwrap();
@@ -257,7 +268,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         session.send_json(&ExtractInfo::new(
             file_no,
             count,
-            file.name()
+            file.name().trim_start_matches("ultimate/mods/")
         ));
 
         let path = Path::new("sd:/").join(file.name());
@@ -276,8 +287,25 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         std::fs::remove_file("sd:/hdr-update.zip");
     }
 
-    session.send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));
-    session.send_json(&commands::ChangeMenu::new("main-menu"));
+    if Path::new("sd:/hdr-changelog.md").exists() {
+        let text = std::fs::read_to_string("sd:/hdr-changelog.md").unwrap();
+        let markdown = text.replace("\\* *This Changelog was automatically generated by [github_changelog_generator](https://github.com/github-changelog-generator/github-changelog-generator)*", "");
+    
+        let parser = pulldown_cmark::Parser::new_ext(markdown.as_str(), pulldown_cmark::Options::all());
+        let mut html_output = String::new();
+        pulldown_cmark::html::push_html(&mut html_output, parser);
+
+        html_output = html_output.replace("\"", "\\\"").replace("\n", "\\n");
+        html_output = html_output.replacen(",/a></p>\\n", "</a></p>\\n<hr style=\\\"width:66%\\\"><div id=\\\"changelogContents\\\">", 1);
+
+        std::fs::remove_file("sd:/hdr-changelog.md");
+
+        session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
+        session.try_send_json(&commands::ChangeMenu::new("text-view"));
+    } else {
+        session.try_send_json(&commands::ChangeMenu::new("main-menu"));
+    }
+    session.try_send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));    
 }
 
 fn count_file_lines(file_name: &str) -> i32 {
@@ -296,6 +324,11 @@ fn count_file_lines(file_name: &str) -> i32 {
     line_total
 }
 
+enum VerifyResult {
+    Success(commands::VerifyInfo),
+    MissingFile(PathBuf),
+    IncorrectFile(PathBuf)
+}
 
 pub fn verify_hdr(session: &WebSession, is_nightly: bool){
     println!("we need to download the hashes to check. is_nightly = {}", is_nightly);
@@ -309,101 +342,118 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool){
         std::fs::create_dir("sd:/downloads/");
     }
 
-    download_file(url, "sd:/downloads/content_hashes.txt", session);
+    download_file(url, "sd:/downloads/content_hashes.txt", session, "hash list".to_string()).unwrap();
 
-    println!("hash download completed. opening file.");
+    let file_data = std::fs::read_to_string("sd:/downloads/content_hashes.txt").unwrap();
 
+    let (tx, rx) = mpsc::channel();
+
+    let handle = std::thread::spawn(move || {
+        let lines = file_data.lines();
+        let line_count = lines.count();
+
+        for (idx, line) in file_data.lines().into_iter().enumerate() {
+            let mut split = line.split(":");
+            let path = match split.next() {
+                Some(x) => x,
+                None => {
+                    println!("Line {} was malformed!", line);
+                    continue;
+                }
+            };
+            let hash = match split.next() {
+                Some(x) => x,
+                None => {
+                    println!("Line {} was malformed!", line);
+                    continue;
+                }
+            };
     
-    let line_total = count_file_lines("sd:/downloads/content_hashes.txt");
-    println!("counted lines: {}", line_total);
+            let path = format!("sd:{}", path);
     
-    let hash_file = match std::fs::File::open("sd:/downloads/content_hashes.txt") {
-        Ok(hashes) => hashes,
-        Err(e) => {
-            println!("line error: {:?}", e);
-            return;
-        }
-    };
-
-
-    println!("opened file handle.");
-    
-    let lines_iter = std::io::BufReader::new(hash_file).lines();
-    let mut lines: Vec<Vec<String>> = Vec::new();
-    let mut i = 0;
-    
-    for line in lines_iter {
-        
-        println!("handling: {}", i);
-
-        let line_vec = match line {
-            Ok(ref the_line) => {
-                println!("line: {}", the_line);
-                if the_line.trim() == "" { continue; }
-                let mut split = the_line.split(":");
-                let path_name = split.next().expect("malformed hash file! No path name???").to_owned();
-                let hash = split.next().expect("malformed hash file! No hash value???").to_owned();
-                vec![path_name, hash]
-            },
-            Err(e) => {
-                println!("line error!");
-                return;
+            let file_path = Path::new(&path);
+            let data = match std::fs::read(file_path) {
+                Ok(data) => data,
+                Err(e) => {
+                    let _ = tx.send(VerifyResult::MissingFile(file_path.to_path_buf()));
+                    continue;
+                }
+            };
+            let digest = md5::compute(data);
+            let digest = format!("{:x}", digest);
+            if digest != hash {
+                let _ = tx.send(VerifyResult::IncorrectFile(file_path.to_path_buf()));
+            } else {
+                let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(idx, line_count, path.trim_start_matches("sd:/ultimate/mods/").to_string())));
             }
-        };
-        let line = line.unwrap();
-        println!("line: {}", line);
-
-        if line_vec.len() == 0 {
-            println!("skipping line: {}!", line);
         }
+    });
 
-        let file_name = "sd:".to_owned() + line_vec.get(0).unwrap();
-        let file_name = file_name.as_str();
-        let hash_value = line_vec.get(1).unwrap();
-        
-
-        let mut info = VerifyInfo::new(i, line_total, file_name);
-
-        let file_to_hash = match std::fs::read(file_name) {
-            Ok(i) => i,
-            Err(e) => {
-                println!("error while reading file {}:\n{:?}", file_name, e);
-                return;
+    let mut missing_files = vec![];
+    let mut bad_files = vec![];
+    loop {
+        let mut value = None;
+        let mut exit = false;
+        loop {
+            match rx.try_recv() {
+                Ok(v) => {
+                    if matches!(&v, VerifyResult::Success(_)) {
+                        value = Some(v);
+                        continue;
+                    } else {
+                        value = Some(v);
+                        break;
+                    }
+                },
+                Err(mpsc::TryRecvError::Empty) => break,
+                _ => {
+                    exit = true;
+                    break;
+                }
             }
-        };
-        let digest = md5::compute(file_to_hash);
-        println!("computed md5: {:x}", digest);
-
-        if !(format!("{:x}", digest).as_str() == hash_value) {
-            println!("could not verify file {}\nfile's md5: {}\nexpected value: {}",
-                file_name,    
-                format!("{:x}", digest),
-                hash_value
-            );
-            return;
-
         }
 
-        let markdown = TEST_MARKDOWN.replace("\\* *This Changelog was automatically generated by [github_changelog_generator](https://github.com/github-changelog-generator/github-changelog-generator)*", "");
-
-        let parser = pulldown_cmark::Parser::new_ext(markdown.as_str(), pulldown_cmark::Options::all());
-
-        let mut html_output = String::new();
-        pulldown_cmark::html::push_html(&mut html_output, parser);
-/*
-        info.text = html_output.replace("\"", "\\\"").replace("\n", "\\n");
-
-        info.text = info.text.replacen("</a></p>\\n", "</a></p>\\n<hr style=\\\"width:66%\\\"><div id=\\\"changelogContents\\\">", 1);
-        info.text += "</div>";
-*/
-        if session.try_send_json(&info){
-            println!("verifying {}", file_name);
+        if exit {
+            break;
         }
 
-        i += 1;        
+        if let Some(value) = value {
+            match value  {
+                VerifyResult::Success(info) => session.send_json(&info),
+                VerifyResult::MissingFile(path) => missing_files.push(path),
+                VerifyResult::IncorrectFile(path) => bad_files.push(path),
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    session.send_json(&Info::new(1.0, "completed", true));
-    println!("verify complete!");
+
+    let mut html_output = String::new();
+
+    if missing_files.is_empty() && bad_files.is_empty() {
+        html_output = "<div id=\\\"changelogContents\\\">There were no issues found with the installation!</div>".to_string();
+    } else {
+        html_output = "<div id=\\\"changelogContents\\\">".to_string();
+        if !missing_files.is_empty() {
+            html_output += "Files not found:<br><ul>";
+            for file in missing_files {
+                html_output += format!("<li><b>{}</b></li>", file.display()).as_str();
+            }
+            html_output += "</ul><br><br>";
+        }
+        if !bad_files.is_empty() {
+            html_output += "Corrupted files:<br><ul>";
+            for file in bad_files {
+                html_output += format!("<li><b>{}</b></li>", file.display()).as_str();
+            }
+            html_output += "</ul><br><br>"
+        }
+        html_output += "</div>";
+    }
+
+    session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
+    session.try_send_json(&commands::ChangeMenu::new("text-view"));
+    session.try_send_json(&commands::ChangeHtml::new("title", "HDR Launcher > Verification Results"));
 }
 
 #[derive(Serialize, Debug)]
@@ -483,6 +533,7 @@ pub fn main() {
             .file("style.css", &CSS_TEXT)
             .file("logo.png", &LOGO_PNG)
             .file("cursor-move.wav", &CURSOR_MOVE_WAV)
+            .file("failure.wav", &FAILURE_WAV)
             .file("start.wav", &START_WAV)
             .background(skyline_web::Background::Default)
             .boot_display(skyline_web::BootDisplay::Black)
@@ -507,6 +558,14 @@ pub fn main() {
                             session.send_json(&commands::ChangeHtml::new("play-button", "<div><text>Vanilla&nbsp;&nbsp;</text></div>"));
                             session.send_json(&commands::ChangeMenu::new("main-menu"));
                         }
+                        session.send_json(&commands::SetOptionStatus::new(
+                            "nightlies",
+                            config::is_enable_nightly_builds(&config)
+                        ));
+                        session.send_json(&commands::SetOptionStatus::new(
+                            "skip_on_launch",
+                            config::is_enable_skip_launcher(&config)
+                        ));
                     }
                     "start" => {
                         println!("starting hdr...");
@@ -527,6 +586,18 @@ pub fn main() {
                     x if x.starts_with("log:") => {
                         println!("{}", x.trim_start_matches("log:"));
                     },
+                    x if x.starts_with("toggle:") => {
+                        let option = x.trim_start_matches("toggle:");
+                        if option == "nightlies" {
+                            let is_enabled = config::is_enable_nightly_builds(&config);
+                            config::enable_nightlies(&mut config, !is_enabled);
+                            session.send_json(&commands::SetOptionStatus::new("nightlies", !is_enabled));
+                        } else if option == "skip_on_launch" {
+                            let is_enabled = config::is_enable_skip_launcher(&config);
+                            config::enable_skip_launcher(&mut config, !is_enabled);
+                            session.send_json(&commands::SetOptionStatus::new("skip_on_launch", !is_enabled));
+                        }
+                    }
                     _ => {}
                 };
 

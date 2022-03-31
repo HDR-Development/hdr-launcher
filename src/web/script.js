@@ -7,6 +7,10 @@ var counter = 0;
 
 var play_start_sfx;
 var play_move_sfx;
+var play_failure;
+
+var nightlies_check = false;
+var skip_on_launch_check = false;
 
 function nx_log(message) {
     // if (window.nx != undefined) {
@@ -30,19 +34,39 @@ function viewProgress() {
     document.getElementById("progress").style.width = '0%';
 }
 
-function viewChangelog(html) {
+function viewOptions() {
+    activeMenu = "options";
+    document.getElementById("mainMenu").style.display = 'none';
+    document.getElementById("optionsMenu").style.display = 'block';
+    document.getElementById("title").innerHTML = "HDR Launcher > Options";
+}
+
+function viewChangelog() {
     activeMenu = "changelog";
     document.getElementById("mainMenu").style.display = 'none';
     document.getElementById("progressSection").style.display = 'none';
-    document.getElementById("changelog").innerHTML = html;
     document.getElementById("changelog").style.display = 'block';
+    document.getElementById("title").innerHTML = "HDR Launcher > Changelog";
+    window.nx.footer.setAssign("B", "", () => { viewMainMenu(); play_move_sfx(); });
 }
 
 function viewMainMenu() {
     activeMenu = "mainMenu";
     document.getElementById("mainMenu").style.display = 'block';
     document.getElementById("progressSection").style.display = 'none';
+    document.getElementById("changelog").style.display = 'none';
     document.getElementById("progress").style.width = '0%';
+    document.getElementById("optionsMenu").style.display = 'none';
+    document.getElementById("title").innerHTML = "HDR Launcher";
+    window.nx.footer.setAssign("B", "", () => { play_failure(); });
+}
+
+function toggleNightlies() {
+    window.nx.sendMessage("toggle:nightlies");
+}
+
+function toggleSkipOnLaunch() {
+    window.nx.sendMessage("toggle:skip_on_launch");
 }
 
 function updateProgress(info) {
@@ -68,10 +92,13 @@ function restartGame() {
     window.location.href = `${LOCALHOST}/restart`;
 }
 
-function versionSelect() {
+function chooseOptions() {
     // select the version of hdr
-    window.nx.sendMessage("version_select");
-    viewProgress();
+    window.nx.sendMessage("choose_options");
+    var target = document.querySelector("#optionsMenu>button:first-child");
+    moveOptions(document.querySelector("#optionsMenu>button.option-active"), target);
+    viewOptions();
+    window.nx.footer.setAssign("B", "", () => { viewMainMenu(); play_move_sfx(); });
 }
 
 function updateHDR() {
@@ -92,6 +119,21 @@ function exit() {
     window.location.href = `${LOCALHOST}/quit`;
 }
 
+function moveUpOptions() {
+    var source = document.querySelector("#optionsMenu>button.option-active");
+    var target = document.querySelector("#optionsMenu>button.option-active").previousElementSibling;
+
+    if (source == undefined) {
+        target = document.querySelector("#optionsMenu>button:first-child");
+    }
+
+    if (target == undefined) {
+        target = document.querySelector("#optionsMenu>button:first-child");
+    }
+
+    moveOptions(source, target);
+}
+
 function moveUp() {
     var source = document.querySelector("#buttons>button.active");
     var target = document.querySelector("#buttons>button.active").previousElementSibling;
@@ -105,6 +147,21 @@ function moveUp() {
     }
 
     move(source, target);
+}
+
+function moveDownOptions() {
+    var source = document.querySelector("#optionsMenu>button.option-active");
+    var target = document.querySelector("#optionsMenu>button.option-active").nextElementSibling;
+
+    if (source == undefined) {
+        target = document.querySelector("#optionsMenu>button:first-child");
+    }
+
+    if (target == undefined) {
+        target = document.querySelector("#optionsMenu>button:first-child");
+    }
+
+    moveOptions(source, target);
 }
 
 function moveDown() {
@@ -122,6 +179,16 @@ function moveDown() {
     move(source, target);
 }
 
+function moveOptions(source, target) {
+    source != undefined ? source.classList.remove("option-active") : false;
+    target != undefined ? target.classList.add("option-active") : false;
+    // updateBtnImg(item.getAttribute("data-img") != undefined ? item.getAttribute("data-img") : item.getAttribute("src"));
+    // if (play_move_sfx) {
+        play_move_sfx();
+    // }
+    // cursor_move.play();
+}
+
 function move(source, target) {
     source != undefined ? source.classList.remove("active") : false;
     target != undefined ? target.classList.add("active") : false;
@@ -137,8 +204,69 @@ function click() {
     document.querySelector("#buttons>button.active").click();
 }
 
+function checkGamepadOptions(index, gamepad) {
+
+    var axisX = gamepad.axes[0];
+    var axisY = gamepad.axes[1];
+
+    // Check A button
+    if (gamepad.buttons[1].pressed) {
+        if (!AButtonHeld[index]) {
+            AButtonHeld[index] = true;
+            play_start_sfx();
+            document.querySelector("#optionsMenu>button.option-active").click();
+        }
+    } else {
+        AButtonHeld[index] = false;
+    }
+
+    // Check if D-pad Left pressed or Left Stick X Axis less than -0.7
+    if (gamepad.buttons[14].pressed || axisX < -0.7) {
+        // Do nothing
+    }
+
+    // Check if D-pad Up pressed or Y-Axis
+    if (gamepad.buttons[12].pressed || axisY < -0.7) {
+        frameUp[index] = frameUp[index] % 8;
+        var should_move = frameUp[index] == 0;
+        frameUp[index] += 1;
+        if (should_move) {
+            moveUpOptions();
+        }
+    } else {
+        frameUp[index] = 0;
+    }
+
+    // Check if D-pad Right pressed or X Axis > 0.7
+    if (gamepad.buttons[15].pressed || axisX > 0.7) {
+        // Do nothing
+    }
+
+    // Check if D-pad Down pressed or Y Axis > 0.7
+    if (gamepad.buttons[13].pressed || axisY > 0.7) {
+        frameDown[index] %= 8;
+        var should_move = frameDown[index] == 0;
+        frameDown[index] += 1;
+        if (should_move) {
+            moveDownOptions();
+        }
+    } else {
+        frameDown[index] = 0;
+    }
+}
+
 function checkGamepad(index, gamepad) {
+
+    counter %= 40;
+    if (counter == 0) {
+        nx_log("wakeup");
+    }
+    counter++;
     if (activeMenu == "progress") { return; }
+    if (activeMenu == "options") {
+        checkGamepadOptions(index, gamepad);
+        return;
+    }
 
     //#region UI Input Check
 
@@ -167,7 +295,11 @@ function checkGamepad(index, gamepad) {
         var should_move = frameUp[index] == 0;
         frameUp[index] += 1;
         if (should_move) {
-            moveUp();
+            if (activeMenu === "changelog") {
+                window.scrollBy(0, -50);
+            } else {
+                moveUp();
+            }
         }
     } else {
         frameUp[index] = 0;
@@ -184,17 +316,15 @@ function checkGamepad(index, gamepad) {
         var should_move = frameDown[index] == 0;
         frameDown[index] += 1;
         if (should_move) {
-            moveDown();
+            if (activeMenu === "changelog") {
+                window.scrollBy(0, 50);
+            } else {
+                moveDown();
+            }
         }
     } else {
         frameDown[index] = 0;
     }
-
-    counter %= 40;
-    if (counter == 0) {
-        nx_log("wakeup");
-    }
-    counter++;
 
     //#endregion
 }
@@ -223,7 +353,7 @@ function updateProgressByDownload(download_info) {
     var progress_bar = document.getElementById("progress");
     progress_bar.style.backgroundColor = "var(--main-progress-download-color)";
     progress_bar.style.width = `${progress * 100}%`;
-    document.getElementById("progressText").innerHTML = `Downloading ${download_info["item_name"]}... ${bps}<br>${download_info["bytes_downloaded"]} / ${download_info["total_bytes"]}`;
+    document.getElementById("progressText").innerHTML = `Downloading ${download_info["item_name"]}... ${bps}<br>${(progress * 100).toFixed(2)}%`;
 }
 
 function updateProgressByExtraction(extract_info) {
@@ -235,7 +365,7 @@ function updateProgressByExtraction(extract_info) {
     var progress_bar = document.getElementById("progress");
     progress_bar.style.width = `${progress * 100}%`;
     progress_bar.style.backgroundColor = "var(--main-button-bg-hover-color)";
-    document.getElementById("progressText").innerHTML = `Extracting '${extract_info["file_name"]}<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
+    document.getElementById("progressText").innerHTML = `Extracting...<br>${extract_info["file_name"]}<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
 }
 
 function updateProgressByVerify(extract_info) {
@@ -246,7 +376,7 @@ function updateProgressByVerify(extract_info) {
     var progress_bar = document.getElementById("progress");
     progress_bar.style.width = `${progress * 100}%`;
     progress_bar.style.backgroundColor = "var(--main-button-bg-hover-color)";
-    document.getElementById("progressText").innerHTML = `Verifying '${extract_info["file_name"]}'<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
+    document.getElementById("progressText").innerHTML = `Verifying...<br>${extract_info["file_name"]}<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
 }
 
 function changeMenuByCommand(change_menu) {
@@ -254,11 +384,31 @@ function changeMenuByCommand(change_menu) {
 
     if (change_menu["going_to"] === "main-menu") {
         viewMainMenu();
+    } else if (change_menu["going_to"] === "text-view") {
+        viewChangelog();
     }
+}
+
+function setOption(set_option) {
+    if (set_option["tag"] !== "set-option") return;
+
+    if (set_option["option"] === "nightlies") {
+        nx_log(set_option["status"]);
+        nightlies_check = set_option["status"] == true;
+    } else if (set_option["option"] === "skip_on_launch") {
+        skip_on_launch = set_option["status"] == true;
+    }
+
+    // if (nightlies_check) {
+        document.getElementById("enable_nightlies").style.visibility = nightlies_check == true ? "visible" : "hidden";
+        document.getElementById("skip_on_launch").style.visibility = skip_on_launch == false ? "visible" : "hidden";
+    // }
 }
 
 function changeHtml(change_html) {
     if (change_html["tag"] !== "change-html") return;
+
+    nx_log(change_html["text"]);
 
     document.getElementById(change_html["id"]).innerHTML = change_html["text"];
 }
@@ -302,6 +452,7 @@ window.onload = () => {
             return;
         }
 
+
         if (info["tag"] === "download-update") {
             updateProgressByDownload(info);
         } else if (info["tag"] === "versioning") {
@@ -321,6 +472,8 @@ window.onload = () => {
             changeMenuByCommand(info);
         } else if (info["tag"] === "change-html") {
             changeHtml(info);
+        } else if (info["tag"] === "set-option") {
+            setOption(info);
         }
         // document.getElementById("progressSection").innerHTML = info.text;
 
@@ -333,19 +486,15 @@ window.onload = () => {
 
     window.nx.sendMessage("load");
 
-    window.nx.footer.setAssign("B", "", () => {});
+    window.nx.footer.setAssign("B", "", () => { play_failure(); });
     window.nx.footer.setAssign("X", "", () => {});
 
     var request = new XMLHttpRequest();
     request.open('GET', './start.wav', true);
     request.responseType = 'arraybuffer';
     request.onload = function () {
-        nx_log("request 1 finished");
-        nx_log(request.response.byteLength);
         audioCtx.decodeAudioData(request.response, function (buffer) {
-            nx_log("setting start");
             play_start_sfx = function() {
-                nx_log("playing start");
                 var source = audioCtx.createBufferSource();
                 source.buffer = buffer;
                 source.connect(audioCtx.destination);
@@ -361,20 +510,33 @@ window.onload = () => {
     request2.open('GET', 'cursor-move.wav', true);
     request2.responseType = 'arraybuffer';
     request2.onload = function() {
-        nx_log("request 2 finished");
-        nx_log(request2.response.byteLength);
         audioCtx.decodeAudioData(request2.response, function (buffer) {
-            nx_log("bruh");
             play_move_sfx = function() {
                 var source = audioCtx.createBufferSource();
                 source.buffer = buffer;
                 source.connect(audioCtx.destination);
                 source.start(0);
-                nx_log("move");
             };
         }, function (error) {
             nx_log("error:" + error);
         });
     };
     request2.send();
+
+    var request3 = new XMLHttpRequest();
+    request3.open('GET', 'failure.wav', true);
+    request3.responseType = 'arraybuffer';
+    request3.onload = function() {
+        audioCtx.decodeAudioData(request3.response, function (buffer) {
+            play_failure = function() {
+                var source = audioCtx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audioCtx.destination);
+                source.start(0);
+            };
+        }, function (error) {
+            nx_log("error:" + error);
+        });
+    };
+    request3.send();
 }
