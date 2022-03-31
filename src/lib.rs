@@ -12,6 +12,7 @@ mod config;
 mod looping_audio;
 mod unzipper;
 mod curl;
+mod util;
 
 // use github::GithubRelease;
 use hound::WavReader;
@@ -19,8 +20,9 @@ use looping_audio::{LoopingAudio, AsyncCommand};
 use semver::Version;
 // use skyline::{hook, install_hook};
 use skyline_web::{Webpage, WebSession};
-use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write}, path::Path};
+use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write, BufRead}, path::Path};
 use serde::{Serialize, Deserialize};
+use util::*;
 
 static HTML_TEXT: &str = include_str!("./web/index.html");
 static JS_TEXT: &str = include_str!("./web/script.js");
@@ -156,6 +158,7 @@ pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>
 }
 
 fn download_file(url: &str, path: &str, session: &WebSession) -> std::io::Result<()> {
+    println!("downloading from: {}", url);
     let mut writer = std::io::BufWriter::with_capacity(
         0x40_0000,
         std::fs::File::create(path)?
@@ -194,6 +197,8 @@ fn download_file(url: &str, path: &str, session: &WebSession) -> std::io::Result
     // unsafe {
     //     skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 16);
     // }
+
+    println!("download complete.");    
 
     ui_updater.join();
 
@@ -234,7 +239,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         };
 
         download_file(url, "sd:/hdr-update.zip", session).unwrap();
-        println!("download complete.");
+        
     }else {
         println!("dont need to download hdr update since there was a zip already on sd...");
     }
@@ -275,13 +280,109 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
     session.send_json(&commands::ChangeMenu::new("main-menu"));
 }
 
-pub fn verify_hdr(session: &WebSession){
-    /*let mut writer = std::io::BufWriter::with_capacity(
-        0x40_00,
-        std::fs::File::create("sd:/content_hashes.txt").unwrap()
-    );*/
-    for i in 1..1001 {
-        let mut info = VerifyInfo::new(i, 1001, "myfile");
+fn count_file_lines(file_name: &str) -> i32 {
+    let file_handle = match std::fs::File::open(file_name) {
+        Ok(hashes) => hashes,
+        Err(e) => {
+            println!("line error: {:?}", e);
+            panic!("could not read file: {}", file_name);
+        }
+    };
+    let lines_iter_initial = std::io::BufReader::new(file_handle).lines();
+    let mut line_total = 0;
+    for line in lines_iter_initial {
+        line_total += 1;
+    }
+    line_total
+}
+
+
+pub fn verify_hdr(session: &WebSession, is_nightly: bool){
+    println!("we need to download the hashes to check. is_nightly = {}", is_nightly);
+    let url = if is_nightly {
+        "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/content_hashes.txt"
+    } else {
+        "https://github.com/HDR-Development/HDR-Releases/releases/latest/download/content_hashes.txt"
+    };
+
+    if !Path::new("sd:/downloads/").exists() {
+        std::fs::create_dir("sd:/downloads/");
+    }
+
+    download_file(url, "sd:/downloads/content_hashes.txt", session);
+
+    println!("hash download completed. opening file.");
+
+    
+    let line_total = count_file_lines("sd:/downloads/content_hashes.txt");
+    println!("counted lines: {}", line_total);
+    
+    let hash_file = match std::fs::File::open("sd:/downloads/content_hashes.txt") {
+        Ok(hashes) => hashes,
+        Err(e) => {
+            println!("line error: {:?}", e);
+            return;
+        }
+    };
+
+
+    println!("opened file handle.");
+    
+    let lines_iter = std::io::BufReader::new(hash_file).lines();
+    let mut lines: Vec<Vec<String>> = Vec::new();
+    let mut i = 0;
+    
+    for line in lines_iter {
+        
+        println!("handling: {}", i);
+
+        let line_vec = match line {
+            Ok(ref the_line) => {
+                println!("line: {}", the_line);
+                if the_line.trim() == "" { continue; }
+                let mut split = the_line.split(":");
+                let path_name = split.next().expect("malformed hash file! No path name???").to_owned();
+                let hash = split.next().expect("malformed hash file! No hash value???").to_owned();
+                vec![path_name, hash]
+            },
+            Err(e) => {
+                println!("line error!");
+                return;
+            }
+        };
+        let line = line.unwrap();
+        println!("line: {}", line);
+
+        if line_vec.len() == 0 {
+            println!("skipping line: {}!", line);
+        }
+
+        let file_name = "sd:".to_owned() + line_vec.get(0).unwrap();
+        let file_name = file_name.as_str();
+        let hash_value = line_vec.get(1).unwrap();
+        
+
+        let mut info = VerifyInfo::new(i, line_total, file_name);
+
+        let file_to_hash = match std::fs::read(file_name) {
+            Ok(i) => i,
+            Err(e) => {
+                println!("error while reading file {}:\n{:?}", file_name, e);
+                return;
+            }
+        };
+        let digest = md5::compute(file_to_hash);
+        println!("computed md5: {:x}", digest);
+
+        if !(format!("{:x}", digest).as_str() == hash_value) {
+            println!("could not verify file {}\nfile's md5: {}\nexpected value: {}",
+                file_name,    
+                format!("{:x}", digest),
+                hash_value
+            );
+            return;
+
+        }
 
         let markdown = TEST_MARKDOWN.replace("\\* *This Changelog was automatically generated by [github_changelog_generator](https://github.com/github-changelog-generator/github-changelog-generator)*", "");
 
@@ -296,10 +397,10 @@ pub fn verify_hdr(session: &WebSession){
         info.text += "</div>";
 */
         if session.try_send_json(&info){
-            println!("verifying {}", i);
+            println!("verifying {}", file_name);
         }
 
-        thread::sleep(time::Duration::from_millis(20)); 
+        i += 1;        
     }
     session.send_json(&Info::new(1.0, "completed", true));
     println!("verify complete!");
@@ -416,9 +517,9 @@ pub fn main() {
                         restart(&session, signal);
                         break;
                     }
-                    "verify_hdr" => verify_hdr(&session),
+                    "verify_hdr" => verify_hdr(&session, config::is_enable_nightly_builds(&config)),
                     "update_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config)),
-                    "version_select" => verify_hdr(&session),
+                    "version_select" => verify_hdr(&session,config::is_enable_nightly_builds(&config)),
                     "exit" => {
                         println!("exiting!");
                         unsafe { skyline::nn::oe::ExitApplication() }
