@@ -22,6 +22,7 @@ zip = { version = "0.5.13", default-features = false, features = ["deflate"] }
 semver = "1.0.6"
 curl-sys = { path = "../curl-rust/curl-sys", default-features = false }
 md5 = "0.7.0"
+walkdir = "2"
 
 [patch.crates-io]
 ring = { git = "https://github.com/skyline-rs/ring", branch = "0.16.20" }

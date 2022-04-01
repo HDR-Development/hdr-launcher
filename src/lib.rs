@@ -330,8 +330,22 @@ enum VerifyResult {
     IncorrectFile(PathBuf)
 }
 
-pub fn verify_hdr(session: &WebSession, is_nightly: bool){
+pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
     println!("we need to download the hashes to check. is_nightly = {}", is_nightly);
+
+    let version = match get_plugin_version() {
+        Some(v) => {
+            println!("version is : {}", v);
+            v
+        },
+        None => {
+            println!("could not determine current version!");
+            let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! Cannot validate! </div>".to_string();
+            show_verification_results(html_output.as_str(), session);
+            return;
+        }
+    };
+
     let url = if is_nightly {
         "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/content_hashes.txt"
     } else {
@@ -348,10 +362,22 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool){
 
     let (tx, rx) = mpsc::channel();
 
+   
     let handle = std::thread::spawn(move || {
         let lines = file_data.lines();
         let line_count = lines.count();
+        let mut file_hashes = Vec::new();
+        
+        let hdr_folders = vec![
+            "sd:/ultimate/mods/hdr",
+            "sd:/ultimate/mods/hdr-stages",
+            "sd:/ultimate/mods/hdr-assets",
+        ];
 
+        let mut deleted_files: Vec<String> = vec![];
+
+        
+        // collect all of the allowed paths
         for (idx, line) in file_data.lines().into_iter().enumerate() {
             let mut split = line.split(":");
             let path = match split.next() {
@@ -370,8 +396,47 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool){
             };
     
             let path = format!("sd:{}", path);
-    
-            let file_path = Path::new(&path);
+            file_hashes.push((path.to_owned(), hash.to_owned()));
+        }
+
+        // remove any undesired files during verification
+        for dir in hdr_folders {
+            let walk = walkdir::WalkDir::new(dir);
+            for entry in walk {
+                // handle any errors
+                if entry.is_err() {
+                    println!("error during walk: {:?}", entry.err().unwrap());
+                    continue;
+                }
+
+                let entry = entry.unwrap();
+                let entry_string = entry.path().as_os_str().to_str().unwrap();
+
+                // skip directories
+                if entry.file_type().is_dir() {
+                    continue;
+                }
+                
+                // check if this file path is present in the list of expected files
+                let mut found = false;
+                for (the_file_path, the_file_hash) in &file_hashes {
+                    if *the_file_path.trim_start_matches("sd:").to_string() == entry_string.to_string().trim_start_matches("sd:").to_string() {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if !found && entry.file_type().is_file() {
+                    println!("entry should be removed: {}", entry_string);
+                    deleted_files.push(entry_string.to_string());
+                }
+            }
+        }
+
+        // verify each file is present
+        let i = 0;
+        for path in file_hashes {
+            let file_path = Path::new(&path.0);
             let data = match std::fs::read(file_path) {
                 Ok(data) => data,
                 Err(e) => {
@@ -381,13 +446,16 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool){
             };
             let digest = md5::compute(data);
             let digest = format!("{:x}", digest);
-            if digest != hash {
+            if digest != path.1 {
                 let _ = tx.send(VerifyResult::IncorrectFile(file_path.to_path_buf()));
             } else {
-                let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(idx, line_count, path.trim_start_matches("sd:/ultimate/mods/").to_string())));
+                let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(i, line_count, path.0.trim_start_matches("sd:/ultimate/mods/").to_string())));
             }
         }
+
+
     });
+
 
     let mut missing_files = vec![];
     let mut bad_files = vec![];
@@ -451,7 +519,11 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool){
         html_output += "</div>";
     }
 
-    session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
+    show_verification_results(&html_output, session);
+}
+
+fn show_verification_results(html: &str, session: &WebSession) {
+    session.try_send_json(&commands::ChangeHtml::new("changelog", html));
     session.try_send_json(&commands::ChangeMenu::new("text-view"));
     session.try_send_json(&commands::ChangeHtml::new("title", "HDR Launcher > Verification Results"));
 }
@@ -470,9 +542,13 @@ pub fn get_romfs_version() -> Option<Version> {
 }
 
 pub fn get_plugin_version() -> Option<Version> {
-    std::fs::read_to_string("sd:/ultimate/mods/hdr/ui/plugin_version.txt")
+    std::fs::read_to_string("sd:/ultimate/mods/hdr/ui/hdr_version.txt")
         .ok()
-        .map(|x| Version::parse(x.as_str().trim().trim_start_matches("v")).ok())
+        .map(|x| Version::parse(
+            x.as_str()
+            .trim()
+            .trim_start_matches("v")
+        ).ok())
         .flatten()
 }
 
