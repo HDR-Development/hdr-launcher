@@ -20,10 +20,11 @@ use looping_audio::{LoopingAudio, AsyncCommand};
 use semver::Version;
 // use skyline::{hook, install_hook};
 use skyline_web::{Webpage, WebSession};
-use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write, BufRead}, path::{Path, PathBuf}};
+use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write, BufRead, Error, ErrorKind}, path::{Path, PathBuf}};
 use serde::{Serialize, Deserialize};
 use util::*;
 use std::collections::HashMap;
+
 
 static HTML_TEXT: &str = include_str!("./web/index.html");
 static JS_TEXT: &str = include_str!("./web/script.js");
@@ -189,7 +190,13 @@ fn download_file(url: &str, path: &str, session: &WebSession, file_name: String)
     }
 
     println!("trying curl with url: {}", url);
-    curl::try_curl(url, &mut writer, session, tx).unwrap();
+    match curl::try_curl(url, &mut writer, session, tx) {
+        Ok(i) => println!("download is successful"),
+        Err(e) => {
+            println!("error during download");
+            return Err(Error::new(ErrorKind::Other, format!("Error while trying to download! code: {}", e)));
+        }
+    };
 
     // unsafe {
     //     skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 16);
@@ -199,11 +206,15 @@ fn download_file(url: &str, path: &str, session: &WebSession, file_name: String)
 
     ui_updater.join();
 
+    writer.flush();
+    panic!();
+
     // unsafe {
     //     allow_home_button();
     //     allow_home_button_short();
     // }
 
+    
     Ok(())
 }
 
@@ -220,10 +231,65 @@ pub fn restart(session: &WebSession, signal: Sender<AsyncCommand>) {
     }
 }
 
+pub fn download_from_latest(is_nightly: bool, artifact_name: &str, created_file_name: &str, session: &WebSession) -> std::io::Result<()> {
+
+    println!("we need to download the hdr update. is_nightly = {}", is_nightly);
+    let mut url = String::new();
+    if is_nightly {
+        url = format!("https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/{}", artifact_name);
+    } else {
+        url = format!("https://github.com/HDR-Development/HDR-Releases/releases/latest/download/{}", artifact_name);
+    }
+
+    // if you remove this print statement, download will panic. so dont do that.
+    println!("downloading from version: {}", url);
+    let url_str = Box::leak(url.into_boxed_str());
+    println!("downloading from version as str: {}", url_str);
+
+    download_file(url_str, format!("sd:/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())  
+    
+}
+
+pub fn download_from_version(is_nightly: bool, artifact_name: &str, created_file_name: &str, version: Version, session: &WebSession) -> std::io::Result<()> {
+
+    let mut url = String::new();
+    if is_nightly {
+        url = format!("https://github.com/HDR-Development/HDR-Nightlies/releases/download/v{}/content_hashes.txt", version.to_string().trim_end_matches("-nightly"));
+    } else {
+        url = format!("https://github.com/HDR-Development/HDR-Releases/releases/download/v{}/content_hashes.txt", version.to_string().trim_end_matches("-beta"));
+    }
+
+    // if you remove this print statement, download will panic. so dont do that.
+    println!("downloading from version: {}", url);
+    let url_str = Box::leak(url.into_boxed_str());
+    println!("downloading from version as str: {}", url_str);
+
+    download_file(url_str, "sd:/downloads/content_hashes.txt", session, "hash list".to_string())
+}
+
 pub fn update_hdr(session: &WebSession, is_nightly: bool) {
     println!("beginning update!");
     if !Path::new("sd:/downloads/").exists() {
         std::fs::create_dir("sd:/downloads/");
+    }
+
+    let version = match get_plugin_version() {
+        Some(v) => {
+            println!("version is : {}", v);
+            v
+        },
+        None => {
+            println!("could not determine current version!");
+            let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! We will perform a full install! </div>";
+            show_verification_results(html_output, session);
+            return;
+        }
+    };
+
+    // delete the old update zip
+    if Path::new("sd:/downloads/hdr-update.zip").exists() {
+        println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
+        std::fs::remove_file("sd:/downloads/hdr-update.zip");
     }
 
     // if the file exists but is empty, remove it
@@ -233,31 +299,11 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         std::fs::remove_file("sd:/downloads/hdr-update.zip");
     }
 
-    // check if the file exists, could exist due to extraction failure
-    if !Path::new("sd:/downloads/hdr-update.zip").exists() {
-        println!("we need to download the hdr update. is_nightly = {}", is_nightly);
-        let url = if is_nightly {
-            "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/switch-package.zip"
-            // "http://192.168.0.113:8000/package23.zip"
-        } else {
-            "https://github.com/HDR-Development/HDR-Releases/releases/latest/download/switch-package.zip"
-        };
+    
+    download_from_latest(is_nightly, "switch-package.zip", "hdr-update.zip", session);
 
-        download_file(url, "sd:/downloads/hdr-update.zip", session, "release archive".to_string()).unwrap();  
-    } else {
-        println!("dont need to download hdr update since there was a zip already on sd...");
-    }
-
-    if !Path::new("sd:/downloads/hdr-changelog.md").exists() {
-        let url = if is_nightly {
-            "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/CHANGELOG.md"
-            // "http://192.168.0.113:8000/package23.zip"
-        } else {
-            "https://github.com/HDR-Development/HDR-Releases/releases/latest/download/CHANGELOG.md"
-        };
-
-        download_file(url, "sd:/downloads/hdr-changelog.md", session, "release changelog".to_string()).unwrap();
-    }
+    download_from_latest(is_nightly, "CHANGELOG.md", "hdr-changelog.md", session);
+    
 
     let mut zip = unzipper::get_zip_archive("sd:/downloads/hdr-update.zip").unwrap();
 
@@ -344,25 +390,24 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
         },
         None => {
             println!("could not determine current version!");
-            let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! Cannot validate! </div>".to_string();
-            show_verification_results(html_output.as_str(), session);
+            let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! Cannot validate! </div>";
+            show_verification_results(html_output, session);
             return;
         }
-    };
-
-    let url = if is_nightly {
-        "https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/content_hashes.txt"
-    } else {
-        "https://github.com/HDR-Development/HDR-Releases/releases/latest/download/content_hashes.txt"
     };
 
     if !Path::new("sd:/downloads/").exists() {
         std::fs::create_dir("sd:/downloads/");
     }
 
-    download_file(url, "sd:/downloads/content_hashes.txt", session, "hash list".to_string()).unwrap();
+    download_from_version(is_nightly, "content_hashes.txt", "content_hashes.txt", version, session);
 
+    println!("downloaded version");
+    
     let file_data = std::fs::read_to_string("sd:/downloads/content_hashes.txt").unwrap();
+
+    
+    println!("read to string");
 
     let (tx, rx) = mpsc::channel();
 
@@ -377,6 +422,8 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
             "sd:/ultimate/mods/hdr-stages",
             "sd:/ultimate/mods/hdr-assets",
         ];
+        
+        let ignore_files = vec!["changelog.toml"];
 
         let mut deleted_files: Vec<String> = vec![];
 
@@ -446,7 +493,11 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
                     let data = match std::fs::read(file_path) {
                         Ok(data) => data,
                         Err(e) => {
-                            let _ = tx.send(VerifyResult::MissingFile(file_path.to_path_buf()));
+                            if ignore_files.contains(&file_path.file_name().unwrap().to_str().unwrap()) {
+                                let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(found_count, line_count, format!("{}", file_path.display()))));
+                            } else {
+                                let _ = tx.send(VerifyResult::MissingFile(file_path.to_path_buf()));
+                            }
                             continue;
                         }
                     };
@@ -461,6 +512,8 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
             }
         }
 
+        
+
         // collect the rest of the expected (hashed) files which may not have already been encountered during the walkdir
         for (path, (hash, already_found)) in files_map {
             if already_found {
@@ -473,7 +526,11 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
             let data = match std::fs::read(file_path) {
                 Ok(data) => data,
                 Err(e) => {
-                    let _ = tx.send(VerifyResult::MissingFile(file_path.to_path_buf()));
+                    if ignore_files.contains(&file_path.file_name().unwrap().to_str().unwrap()) {
+                        let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(found_count, line_count, format!("{}", file_path.display()))));
+                    } else {
+                        let _ = tx.send(VerifyResult::MissingFile(file_path.to_path_buf()));
+                    }
                     continue;
                 }
             };

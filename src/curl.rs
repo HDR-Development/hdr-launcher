@@ -108,10 +108,10 @@ pub fn try_curl(
     unsafe {
         SENDER = Some(std::mem::transmute(&mut sender as *mut Sender<DownloadInfo>));
         // assert_eq!(global_init_mem(3, malloc, free, realloc, strdup, calloc), curl_sys::CURLE_OK);
-        let ptr = [url, "\0"].concat();
+        let ptr = Box::leak( [url, "\0"].concat().into_boxed_str() );
         let curl = easy_init();
         let header = slist_append(std::ptr::null_mut(), "Accept: application/octet-stream\0".as_ptr());
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_URL, ptr.as_str().as_ptr()))?;
+        curle!(easy_setopt(curl, curl_sys::CURLOPT_URL, ptr.as_ptr()))?;
         curle!(easy_setopt(curl, curl_sys::CURLOPT_HTTPHEADER, header))?;
         curle!(easy_setopt(curl, curl_sys::CURLOPT_FOLLOWLOCATION, 1u64))?;
         curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEDATA, writer))?;
@@ -124,7 +124,6 @@ pub fn try_curl(
         START_TICK = skyline::nn::os::GetSystemTick() as usize;
         curle!(easy_perform(curl))?;
         curle!(easy_cleanup(curl))?;
-        easy_cleanup(curl);
     }
 
     Ok(())
