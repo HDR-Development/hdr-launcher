@@ -48,6 +48,7 @@ function viewChangelog() {
     document.getElementById("changelog").style.display = 'block';
     document.getElementById("title").innerHTML = "HDR Launcher > Changelog";
     window.nx.footer.setAssign("B", "", () => { viewMainMenu(); play_move_sfx(); });
+    window.nx.footer.setAssign("A", "", () => { viewMainMenu(); play_move_sfx(); });
 }
 
 function viewMainMenu() {

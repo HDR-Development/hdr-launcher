@@ -155,11 +155,7 @@ fn download_file(url: &str, path: &str, session: &WebSession, file_name: String)
     //     block_home_button();
     //     block_home_button_short();
     // }
-    println!("downloading from: {}", url);
-    let mut writer = std::io::BufWriter::with_capacity(
-        0x40_0000,
-        std::fs::File::create(path)?
-    );
+    
 
     let session2 = session as *const WebSession as u64;
 
@@ -189,6 +185,17 @@ fn download_file(url: &str, path: &str, session: &WebSession, file_name: String)
         skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 2);
     }
 
+    println!("downloading from: {}", url);
+
+    // delete the original file if this file already exists on sd
+    if Path::new(path).exists() {
+        std::fs::remove_file(path);
+    }
+    let mut writer = std::io::BufWriter::with_capacity(
+        0x40_0000,
+        std::fs::File::create(path)?
+    );
+
     println!("trying curl with url: {}", url);
     match curl::try_curl(url, &mut writer, session, tx) {
         Ok(i) => println!("download is successful"),
@@ -207,8 +214,6 @@ fn download_file(url: &str, path: &str, session: &WebSession, file_name: String)
     ui_updater.join();
 
     writer.flush();
-    panic!();
-
     // unsafe {
     //     allow_home_button();
     //     allow_home_button_short();
@@ -243,7 +248,7 @@ pub fn download_from_latest(is_nightly: bool, artifact_name: &str, created_file_
 
     // if you remove this print statement, download will panic. so dont do that.
     println!("downloading from version: {}", url);
-    let url_str = Box::leak(url.into_boxed_str());
+    let url_str = url.as_str();
     println!("downloading from version as str: {}", url_str);
 
     download_file(url_str, format!("sd:/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())  
@@ -254,17 +259,41 @@ pub fn download_from_version(is_nightly: bool, artifact_name: &str, created_file
 
     let mut url = String::new();
     if is_nightly {
-        url = format!("https://github.com/HDR-Development/HDR-Nightlies/releases/download/v{}/content_hashes.txt", version.to_string().trim_end_matches("-nightly"));
+        url = format!("https://github.com/HDR-Development/HDR-Nightlies/releases/download/v{}/{}", version.to_string().trim_end_matches("-nightly"), artifact_name);
     } else {
-        url = format!("https://github.com/HDR-Development/HDR-Releases/releases/download/v{}/content_hashes.txt", version.to_string().trim_end_matches("-beta"));
+        url = format!("https://github.com/HDR-Development/HDR-Releases/releases/download/v{}/{}", version.to_string().trim_end_matches("-beta"), artifact_name);
     }
 
     // if you remove this print statement, download will panic. so dont do that.
     println!("downloading from version: {}", url);
-    let url_str = Box::leak(url.into_boxed_str());
+    let url_str = url.as_str();
     println!("downloading from version as str: {}", url_str);
 
-    download_file(url_str, "sd:/downloads/content_hashes.txt", session, "hash list".to_string())
+    download_file(url_str, format!("sd:/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())
+}
+
+pub fn get_latest_version(session: &WebSession, is_nightly: bool) -> Result<Version, Error> {
+    match download_from_latest(is_nightly, "hdr_version.txt", "hdr_version.txt", session) {
+        Ok(i) => println!("latest version info downloaded!"),
+        Err(e) => {
+            println!("error while downloading latest version file! Either the latest upload is broken, or you do not have interenet access? {:?}", e);
+            return Err(e);
+        }
+    }
+
+    let latest_str = match std::fs::read_to_string(Path::new("sd:/downloads/hdr_version.txt")) {
+        Ok(i) => i,
+        Err(e) => {
+            println!("error while reading version string: {:?}", e);
+            return Err(e);
+        }
+    };
+
+    match Version::parse(latest_str.trim_start_matches("v")) {
+        Ok(v) => Ok(v),
+        Err(e) => Err(Error::new(ErrorKind::Other, e))
+    }
+
 }
 
 pub fn update_hdr(session: &WebSession, is_nightly: bool) {
@@ -273,7 +302,9 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         std::fs::create_dir("sd:/downloads/");
     }
 
-    let version = match get_plugin_version() {
+    let mut final_changelog = String::new();
+    
+    let mut current = match get_plugin_version() {
         Some(v) => {
             println!("version is : {}", v);
             v
@@ -282,79 +313,161 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
             println!("could not determine current version!");
             let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! We will perform a full install! </div>";
             show_verification_results(html_output, session);
+            Version::new(0,0,0)
+        }
+    };
+
+    let latest = match get_latest_version(session, is_nightly) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Could not determine latest version due to error: {:?}", e);
+            let html_output = format!("<div id=\\\"changelogContents\\\">Could not determine latest version! Please connect to the internet to update. Error: {:?} </div>", e);
+            show_verification_results(html_output.as_str(), session);
             return;
         }
     };
 
-    // delete the old update zip
-    if Path::new("sd:/downloads/hdr-update.zip").exists() {
-        println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
-        std::fs::remove_file("sd:/downloads/hdr-update.zip");
-    }
-
-    // if the file exists but is empty, remove it
-    if Path::new("sd:/downloads/hdr-update.zip").exists() && std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len() < 100 {
-        // todo: get hash of zip and verify the existing zip is valid, else delete it, rather than using file size (lol)
-        println!("removing invalid hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
-        std::fs::remove_file("sd:/downloads/hdr-update.zip");
-    }
-
-    
-    download_from_latest(is_nightly, "switch-package.zip", "hdr-update.zip", session);
-
-    download_from_latest(is_nightly, "CHANGELOG.md", "hdr-changelog.md", session);
-    
-
-    let mut zip = unzipper::get_zip_archive("sd:/downloads/hdr-update.zip").unwrap();
-
-    let count = zip.len();
-
-    for file_no in 0..count {
-        let mut file = zip.by_index(file_no).unwrap();
-        if !file.is_file() {
-            continue;
-        }
-
-        session.send_json(&ExtractInfo::new(
-            file_no,
-            count,
-            file.name().trim_start_matches("ultimate/mods/")
-        ));
-
-        let path = Path::new("sd:/").join(file.name());
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent);
-        }
-
-        let mut file_data = vec![];
-        file.read_to_end(&mut file_data).unwrap();
-        std::fs::write(path, file_data).unwrap();
-    }
-
-    // delete the update zip
-    if Path::new("sd:/downloads/hdr-update.zip").exists() {
-        println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
-        std::fs::remove_file("sd:/downloads/hdr-update.zip");
-    }
-
-    if Path::new("sd:/downloads/hdr-changelog.md").exists() {
-        let text = std::fs::read_to_string("sd:/downloads/hdr-changelog.md").unwrap();
-        let markdown = text.replace("\\* *This Changelog was automatically generated by [github_changelog_generator](https://github.com/github-changelog-generator/github-changelog-generator)*", "");
-    
-        let parser = pulldown_cmark::Parser::new_ext(markdown.as_str(), pulldown_cmark::Options::all());
-        let mut html_output = String::new();
-        pulldown_cmark::html::push_html(&mut html_output, parser);
-
-        html_output = html_output.replace("\"", "\\\"").replace("\n", "\\n");
-        html_output = html_output.replacen(",/a></p>\\n", "</a></p>\\n<hr style=\\\"width:66%\\\"><div id=\\\"changelogContents\\\">", 1);
-
-        std::fs::remove_file("sd:/downloads/hdr-changelog.md");
-
-        session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
-        session.try_send_json(&commands::ChangeMenu::new("text-view"));
+    // compare versions
+    if latest < current {
+        println!("Somehow your current version ({}) is newer than the latest on the github releases ({}). This should not be possible.", current, latest);
+        let html_output = format!("<div id=\\\"changelogContents\\\">Somehow your current version ({}) is newer than the latest on the github releases ({}). This should not be possible. We cannot update in this state. </div>", current, latest);
+        show_verification_results(html_output.as_str(), session);
+        return;
+    } else if current == latest {
+        println!("You are already on the latest! Current install: {}, Latest: {}", current, latest);
+        let html_output = format!("<div id=\\\"changelogContents\\\">You are already on the latest! Current install: {}, Latest: {}. No Update is necessary. </div>", current, latest);
+        show_verification_results(html_output.as_str(), session);
+        return;
     } else {
-        session.try_send_json(&commands::ChangeMenu::new("main-menu"));
+        println!("we need to update. Current: {}, Latest: {}", current, latest);
     }
+
+    // walk the chain forever potentially (we have breaking conditions below)
+    while (current != latest) {
+        
+        // delete the old update zip
+        if Path::new("sd:/downloads/hdr-update.zip").exists() {
+            println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
+            std::fs::remove_file("sd:/downloads/hdr-update.zip");
+        }
+
+
+        // try and see if we can get the upgrade.zip file to "walk the chain" of updates.
+        let can_upgrade = match download_from_version(is_nightly, "upgrade.zip", "hdr-update.zip", current.clone(), session) {
+            Ok(i) => {
+                println!("we can walk the chain!");
+                true
+            },
+            Err(e) => {
+                println!("error while checking for upgrade.zip: {:?}", e);
+                false
+            }
+        };
+        
+        // if there is no upgrade package available for the current version, then we will just have to perform a full
+        if !can_upgrade {
+            match download_from_latest(is_nightly, "switch-package.zip", "hdr-update.zip", session) {
+                Ok(i) => println!("latest full download complete."),
+                Err(e) => {
+                    println!("could not get full download! Error: {:?}", e);
+                    let html_output = format!(
+                        "<div id=\\\"changelogContents\\\">Could not get full install download! Current version: {}, Latest: {}. Update failed. Error: {:?} </div>", current, latest, e);
+                    show_verification_results(html_output.as_str(), session);
+                    return;
+                }
+            }
+        }
+
+        
+        let mut zip = unzipper::get_zip_archive("sd:/downloads/hdr-update.zip").unwrap();
+
+        let count = zip.len();
+
+        for file_no in 0..count {
+            let mut file = zip.by_index(file_no).unwrap();
+            if !file.is_file() {
+                continue;
+            }
+
+            session.send_json(&ExtractInfo::new(
+                file_no,
+                count,
+                file.name().trim_start_matches("ultimate/mods/")
+            ));
+
+            let path = Path::new("sd:/").join(file.name());
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent);
+            }
+
+            let mut file_data = vec![];
+            file.read_to_end(&mut file_data).unwrap();
+            std::fs::write(path, file_data).unwrap();
+        }
+
+        // delete the update zip
+        if Path::new("sd:/downloads/hdr-update.zip").exists() {
+            println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
+            std::fs::remove_file("sd:/downloads/hdr-update.zip");
+        }
+
+
+        // get the newly installed version
+        let new_version = match get_plugin_version() {
+            Some(v) => {
+                println!("version is : {}", v);
+                v
+            },
+            None => {
+                println!("could not determine current version!");
+                let html_output = "<div id=\\\"changelogContents\\\">Could not determine new version! Please try to update again. </div>";
+                show_verification_results(html_output, session);
+                return;
+            }
+        };
+
+        // get the current changelog for the version we just installed, and append it
+        final_changelog = format!("{}\n{}", final_changelog, match download_from_version(is_nightly, "CHANGELOG.md", "hdr-changelog.md", new_version.clone(), session) {
+            Ok(i) => {
+                // append the eventual changelog text
+                if Path::new("sd:/downloads/hdr-changelog.md").exists() {
+                    match std::fs::read_to_string("sd:/downloads/hdr-changelog.md") {
+                        Ok(s) => s,
+                        Err(e) => format!("Error while getting changelog for new version: {}", new_version)
+
+                    }
+                } else {
+                    format!("Changelog for {} was downloaded but could not be found? This should be impossible. Please report this.", new_version)
+                }
+            },
+            Err(e) => {
+                format!("Changelog for {} could not be downloaded. Please report this.", new_version)
+            }
+        });
+
+        if new_version == latest {
+            break;
+        }
+
+        current = new_version;
+    }
+
+
+    // display the built up changelog
+    let markdown = final_changelog.replace("\\* *This Changelog was automatically generated by [github_changelog_generator](https://github.com/github-changelog-generator/github-changelog-generator)*", "");
+
+    let parser = pulldown_cmark::Parser::new_ext(markdown.as_str(), pulldown_cmark::Options::all());
+    let mut html_output = String::new();
+    pulldown_cmark::html::push_html(&mut html_output, parser);
+
+    html_output = html_output.replace("\"", "\\\"").replace("\n", "\\n");
+    html_output = html_output.replacen(",/a></p>\\n", "</a></p>\\n<hr style=\\\"width:66%\\\"><div id=\\\"changelogContents\\\">", 1);
+
+    std::fs::remove_file("sd:/downloads/hdr-changelog.md");
+
+    session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
+    session.try_send_json(&commands::ChangeMenu::new("text-view"));
+    
     session.try_send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));    
 }
 
