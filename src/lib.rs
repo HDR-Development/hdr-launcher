@@ -150,151 +150,6 @@ pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>
     session.wait_for_exit();
 }
 
-fn download_file(url: &str, path: &str, session: &WebSession, file_name: String) -> std::io::Result<()> {
-    // unsafe {
-    //     block_home_button();
-    //     block_home_button_short();
-    // }
-    
-
-    let session2 = session as *const WebSession as u64;
-
-    let (tx, rx) = mpsc::channel();
-    let ui_updater = std::thread::spawn(move || {
-        let session = unsafe { &*(session2 as *const WebSession) };
-        loop {
-            let mut value: Option<DownloadInfo> = None;
-            loop {
-                match rx.try_recv() {
-                    Ok(v) => value = Some(v),
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    _ => return
-                }
-            }
-
-            if let Some(mut value) = value {
-                value.item_name = file_name.as_str();
-                println!("{}", session.try_send_json(&value));
-            }
-
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-    });
-
-    unsafe {
-        skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 2);
-    }
-
-    println!("downloading from: {}", url);
-
-    // delete the original file if this file already exists on sd
-    if Path::new(path).exists() {
-        std::fs::remove_file(path);
-    }
-    let mut writer = std::io::BufWriter::with_capacity(
-        0x40_0000,
-        std::fs::File::create(path)?
-    );
-
-    println!("trying curl with url: {}", url);
-    match curl::try_curl(url, &mut writer, session, tx) {
-        Ok(i) => println!("download is successful"),
-        Err(e) => {
-            println!("error during download");
-            return Err(Error::new(ErrorKind::Other, format!("Error while trying to download! code: {}", e)));
-        }
-    };
-
-    // unsafe {
-    //     skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 16);
-    // }
-
-    println!("download complete.");    
-
-    ui_updater.join();
-
-    writer.flush();
-    // unsafe {
-    //     allow_home_button();
-    //     allow_home_button_short();
-    // }
-
-    
-    Ok(())
-}
-
-pub fn restart(session: &WebSession, signal: Sender<AsyncCommand>) {
-    signal.send(AsyncCommand::ChangeVolumeOverTime { new_volume: 0.0, time: 1.6 });
-    
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-
-    signal.send(AsyncCommand::Quit);
-    session.send_json(&commands::Restart::new());
-    session.wait_for_exit();
-    unsafe {
-        skyline::nn::oe::RequestToRelaunchApplication();
-    }
-}
-
-pub fn download_from_latest(is_nightly: bool, artifact_name: &str, created_file_name: &str, session: &WebSession) -> std::io::Result<()> {
-
-    println!("we need to download the hdr update. is_nightly = {}", is_nightly);
-    let mut url = String::new();
-    if is_nightly {
-        url = format!("https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/{}", artifact_name);
-    } else {
-        url = format!("https://github.com/HDR-Development/HDR-Releases/releases/latest/download/{}", artifact_name);
-    }
-
-    // if you remove this print statement, download will panic. so dont do that.
-    println!("downloading from version: {}", url);
-    let url_str = url.as_str();
-    println!("downloading from version as str: {}", url_str);
-
-    download_file(url_str, format!("sd:/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())  
-    
-}
-
-pub fn download_from_version(is_nightly: bool, artifact_name: &str, created_file_name: &str, version: Version, session: &WebSession) -> std::io::Result<()> {
-
-    let mut url = String::new();
-    if is_nightly {
-        url = format!("https://github.com/HDR-Development/HDR-Nightlies/releases/download/v{}/{}", version.to_string().trim_end_matches("-nightly"), artifact_name);
-    } else {
-        url = format!("https://github.com/HDR-Development/HDR-Releases/releases/download/v{}/{}", version.to_string().trim_end_matches("-beta"), artifact_name);
-    }
-
-    // if you remove this print statement, download will panic. so dont do that.
-    println!("downloading from version: {}", url);
-    let url_str = url.as_str();
-    println!("downloading from version as str: {}", url_str);
-
-    download_file(url_str, format!("sd:/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())
-}
-
-pub fn get_latest_version(session: &WebSession, is_nightly: bool) -> Result<Version, Error> {
-    match download_from_latest(is_nightly, "hdr_version.txt", "hdr_version.txt", session) {
-        Ok(i) => println!("latest version info downloaded!"),
-        Err(e) => {
-            println!("error while downloading latest version file! Either the latest upload is broken, or you do not have interenet access? {:?}", e);
-            return Err(e);
-        }
-    }
-
-    let latest_str = match std::fs::read_to_string(Path::new("sd:/downloads/hdr_version.txt")) {
-        Ok(i) => i,
-        Err(e) => {
-            println!("error while reading version string: {:?}", e);
-            return Err(e);
-        }
-    };
-
-    match Version::parse(latest_str.trim_start_matches("v")) {
-        Ok(v) => Ok(v),
-        Err(e) => Err(Error::new(ErrorKind::Other, e))
-    }
-
-}
 
 pub fn update_hdr(session: &WebSession, is_nightly: bool) {
     println!("beginning update!");
@@ -304,7 +159,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
 
     let mut final_changelog = String::new();
     
-    let mut current = match get_plugin_version() {
+    let mut current = match util::get_plugin_version() {
         Some(v) => {
             println!("version is : {}", v);
             v
@@ -317,7 +172,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         }
     };
 
-    let latest = match get_latest_version(session, is_nightly) {
+    let latest = match util::get_latest_version(session, is_nightly) {
         Ok(v) => v,
         Err(e) => {
             println!("Could not determine latest version due to error: {:?}", e);
@@ -353,7 +208,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
 
 
         // try and see if we can get the upgrade.zip file to "walk the chain" of updates.
-        let can_upgrade = match download_from_version(is_nightly, "upgrade.zip", "hdr-update.zip", current.clone(), session) {
+        let can_upgrade = match util::download_from_version(is_nightly, "upgrade.zip", "hdr-update.zip", current.clone(), session) {
             Ok(i) => {
                 println!("we can walk the chain!");
                 true
@@ -366,7 +221,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         
         // if there is no upgrade package available for the current version, then we will just have to perform a full
         if !can_upgrade {
-            match download_from_latest(is_nightly, "switch-package.zip", "hdr-update.zip", session) {
+            match util::download_from_latest(is_nightly, "switch-package.zip", "hdr-update.zip", session) {
                 Ok(i) => println!("latest full download complete."),
                 Err(e) => {
                     println!("could not get full download! Error: {:?}", e);
@@ -413,7 +268,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
 
 
         // get the newly installed version
-        let new_version = match get_plugin_version() {
+        let new_version = match util::get_plugin_version() {
             Some(v) => {
                 println!("version is : {}", v);
                 v
@@ -427,7 +282,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         };
 
         // get the current changelog for the version we just installed, and append it
-        final_changelog = format!("{}\n{}", final_changelog, match download_from_version(is_nightly, "CHANGELOG.md", "hdr-changelog.md", new_version.clone(), session) {
+        final_changelog = format!("{}\n{}", final_changelog, match util::download_from_version(is_nightly, "CHANGELOG.md", "hdr-changelog.md", new_version.clone(), session) {
             Ok(i) => {
                 // append the eventual changelog text
                 if Path::new("sd:/downloads/hdr-changelog.md").exists() {
@@ -471,21 +326,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
     session.try_send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));    
 }
 
-fn count_file_lines(file_name: &str) -> i32 {
-    let file_handle = match std::fs::File::open(file_name) {
-        Ok(hashes) => hashes,
-        Err(e) => {
-            println!("line error: {:?}", e);
-            panic!("could not read file: {}", file_name);
-        }
-    };
-    let lines_iter_initial = std::io::BufReader::new(file_handle).lines();
-    let mut line_total = 0;
-    for line in lines_iter_initial {
-        line_total += 1;
-    }
-    line_total
-}
+
 
 enum VerifyResult {
     Success(commands::VerifyInfo),
@@ -496,7 +337,7 @@ enum VerifyResult {
 pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
     println!("we need to download the hashes to check. is_nightly = {}", is_nightly);
 
-    let version = match get_plugin_version() {
+    let version = match util::get_plugin_version() {
         Some(v) => {
             println!("version is : {}", v);
             v
@@ -513,7 +354,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
         std::fs::create_dir("sd:/downloads/");
     }
 
-    download_from_version(is_nightly, "content_hashes.txt", "content_hashes.txt", version, session);
+    util::download_from_version(is_nightly, "content_hashes.txt", "content_hashes.txt", version, session);
 
     println!("downloaded version");
     
@@ -535,6 +376,18 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
             "sd:/ultimate/mods/hdr-stages",
             "sd:/ultimate/mods/hdr-assets",
         ];
+
+        // if these files are present, we will *always* delete them
+        let always_delete_files = vec![
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/libsmashline_hook_development.nro",
+        ];
+
+        for file in always_delete_files {
+            if Path::new(file).exists() {
+                println!("deleting file: {}", file);
+                std::fs::remove_file(file);
+            }
+        }
         
         let ignore_files = vec!["changelog.toml"];
 
@@ -738,29 +591,7 @@ fn show_verification_results(html: &str, session: &WebSession) {
     session.try_send_json(&commands::ChangeHtml::new("title", "HDR Launcher > Verification Results"));
 }
 
-#[derive(Serialize, Debug)]
-pub struct VersionInfo {
-    code: String,
-    romfs: String
-}
 
-pub fn get_romfs_version() -> Option<Version> {
-    std::fs::read_to_string("sd:/ultimate/mods/hdr-assets/ui/romfs_version.txt")
-        .ok()
-        .map(|x| dbg!(Version::parse(x.as_str().trim().trim_start_matches("v"))).ok())
-        .flatten()
-}
-
-pub fn get_plugin_version() -> Option<Version> {
-    std::fs::read_to_string("sd:/ultimate/mods/hdr/ui/hdr_version.txt")
-        .ok()
-        .map(|x| Version::parse(
-            x.as_str()
-            .trim()
-            .trim_start_matches("v")
-        ).ok())
-        .flatten()
-}
 
 #[skyline::main(name = "HDRLauncher")]
 pub fn main() {
@@ -833,7 +664,7 @@ pub fn main() {
             if let Some(msg) = session.try_recv() {
                 match msg.as_str() {
                     "load" => {
-                        let plugin_version = get_plugin_version().map(|x| x.to_string()).unwrap_or("???".to_string());
+                        let plugin_version = util::get_plugin_version().map(|x| x.to_string()).unwrap_or("???".to_string());
                         let romfs_version = get_romfs_version().map(|x| x.to_string()).unwrap_or("???".to_string());
                         session.send_json(&VersionInfo {
                             code: plugin_version.clone(),
