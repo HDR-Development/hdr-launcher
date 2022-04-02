@@ -52,11 +52,21 @@ impl LoopingAudio {
         loop_start: usize,
         loop_end: usize,
         volume: f32,
+        fade_in_time: f32,
+
         buffer_count: usize,
         seconds_buffered: f32,
     ) -> Self
     {
         let (audio, audio_complete_event) = audio::default_audio_out(48000, 2).expect("Failed to initialize audio driver!");
+        let volume_dec = if fade_in_time != 0.0 {
+            let num_decreases = (fade_in_time / seconds_buffered * buffer_count as f32).ceil() as usize;
+            let dec_amt = (0.0 - fade_in_time) / num_decreases as f32;
+            vec![dec_amt; num_decreases]
+        } else {
+            vec![]
+        };
+
         Self {
             audio,
             audio_complete_event,
@@ -68,7 +78,7 @@ impl LoopingAudio {
             seconds_buffered,
 
             playing_current_sample: 0,
-            volume_dec: vec![]
+            volume_dec
         }
     }
 

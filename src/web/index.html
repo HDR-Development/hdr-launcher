@@ -20,17 +20,17 @@
         <div  class="grid-container">
             <div class="sidebar">
                 <div id="buttons">
-                    <button onclick="startHDR();" class="active" data-desc="Launch HewDraw Remix" data-img="logo.png" nx-se-disabled="">
+                    <button id="play-button" onclick="startHDR();" class="active" data-desc="Launch HewDraw Remix" data-img="logo.png" nx-se-disabled="">
                         <div><text>Play&nbsp;&nbsp;</text></div>
                     </button>
-                    <button onclick="updateHDR();" data-desc="Update HDR to the latest version." data-img="logo.png" nx-se-disabled="">
+                    <button id="update-button" onclick="updateHDR();" data-desc="Update HDR to the latest version." data-img="logo.png" nx-se-disabled="">
                         <div><text>Update&nbsp;&nbsp;</text></div>
-                    </button>
-                    <button onclick="versionSelect();" data-desc="Select which version of HDR to play." data-img="logo.png" nx-se-disabled="">
-                        <div><text>Versions&nbsp;&nbsp;</text></div>
                     </button>
                     <button onclick="verifyHDR();" data-desc="Verify your current installation of HDR." data-img="logo.png" nx-se-disabled="">
                         <div><text>Verify&nbsp;&nbsp;</text></div>
+                    </button>
+                    <button onclick="chooseOptions();" data-desc="Change your options for the launcher." data-img="logo.png" nx-se-disabled="">
+                        <div><text>Options&nbsp;&nbsp;</text></div>
                     </button>
                     <button onclick="exit();" data-desc="Exit to the Home Menu." data-img="logo.png" nx-se-disabled="">
                         <div><text>Exit&nbsp;&nbsp;</text></div>
@@ -56,6 +56,21 @@
             </div>
             <p id="progressText">Loading...</p>
         </div>
+    </div>
+
+    <div id="optionsMenu" class="flex-container">
+        <button onclick="toggleNightlies()" class="flex-item">
+            <div class="icon-background"><img id="enable_nightlies" style="visibility:hidden" src="check.svg" /></div>
+            <div class="item-container">
+                <h2>Enable the nightly update channel</h2>
+            </div>
+        </button>
+        <button onclick="toggleSkipOnLaunch()" class="flex-item">
+            <div class="icon-background"><img id="skip_on_launch" style="visibility:hidden" src="check.svg" /></div>
+            <div class="item-container">
+                <h2>Always display this menu on launch</h2>
+            </div>
+        </button>
     </div>
 
     <div id="changelog"></div>

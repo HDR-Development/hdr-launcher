@@ -6,10 +6,13 @@
 #![allow(dead_code)]
 #![feature(c_variadic)]
 mod audio;
+mod commands;
+mod config;
 // mod github;
 mod looping_audio;
 mod unzipper;
 mod curl;
+mod util;
 
 // use github::GithubRelease;
 use hound::WavReader;
@@ -17,8 +20,11 @@ use looping_audio::{LoopingAudio, AsyncCommand};
 use semver::Version;
 // use skyline::{hook, install_hook};
 use skyline_web::{Webpage, WebSession};
-use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write}, path::Path};
+use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write, BufRead, Error, ErrorKind}, path::{Path, PathBuf}};
 use serde::{Serialize, Deserialize};
+use util::*;
+use std::collections::HashMap;
+
 
 static HTML_TEXT: &str = include_str!("./web/index.html");
 static JS_TEXT: &str = include_str!("./web/script.js");
@@ -27,7 +33,22 @@ static LOGO_PNG: &[u8] = include_bytes!("./web/logo.png");
 static TEST_MARKDOWN: &str = include_str!("./web/test.md");
 static START_WAV: &[u8] = include_bytes!("./web/start.wav");
 static CURSOR_MOVE_WAV: &[u8] = include_bytes!("./web/cursor-move.wav");
+static FAILURE_WAV: &[u8] = include_bytes!("./web/failure.wav");
 static BGM_WAV: &[u8] = include_bytes!("./web/bgm.wav");
+
+extern "C" {
+    #[link_name = "_ZN2nn2oe23BeginBlockingHomeButtonEv"]
+    fn block_home_button();
+
+    #[link_name = "_ZN2nn2oe35BeginBlockingHomeButtonShortPressedEv"]
+    fn block_home_button_short();
+
+    #[link_name = "_ZN2nn2oe21EndBlockingHomeButtonEv"]
+    fn allow_home_button();
+
+    #[link_name = "_ZN2nn2oe33EndBlockingHomeButtonShortPressedEv"]
+    fn allow_home_button_short();
+}
 
 #[global_allocator]
 static SMASH_ALLOCATOR: skyline::unix_alloc::UnixAllocator = skyline::unix_alloc::UnixAllocator;
@@ -86,30 +107,6 @@ impl<'a> ExtractInfo<'a> {
 }
 
 #[derive(Serialize, Debug)]
-struct VerifyInfo<'a> {
-    pub tag: &'static str,
-    pub file_number: usize,
-    pub file_count: usize,
-    pub file_name: &'a str
-}
-
-impl<'a> VerifyInfo<'a> {
-    pub fn new(
-        file_number: usize,
-        file_count: usize,
-        file_name: &'a str
-    ) -> Self
-    {
-        Self {
-            tag: "verify-install",
-            file_number,
-            file_count,
-            file_name
-        }
-    }
-}
-
-#[derive(Serialize, Debug)]
 pub struct DownloadInfo<'a> {
     pub tag: &'static str,
     pub bps: f64,
@@ -146,138 +143,462 @@ struct EndCommand {
 pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>) {
     signal.send(AsyncCommand::ChangeVolumeOverTime { new_volume: 0.0, time: 1.6 });
     
-    signal.send(AsyncCommand::Quit);
-    session.send_json(&EndCommand {
-        contents: "exit".to_string()
-    });
+    std::thread::sleep(std::time::Duration::from_millis(1500));
 
-    println!("exiting session");
-    session.exit();
+    signal.send(AsyncCommand::Quit);
+    session.send_json(&commands::Start::new());
+    session.wait_for_exit();
 }
 
 
-pub fn update_hdr(session: &WebSession) {
+pub fn update_hdr(session: &WebSession, is_nightly: bool) {
+    println!("beginning update!");
+    if !Path::new("sd:/downloads/").exists() {
+        std::fs::create_dir("sd:/downloads/");
+    }
 
-    // let name = betas[0].assets[1].name.as_str();
-    // let release_url = betas[0].assets[1].api_url.as_str();
-    // let total_size = betas[0].assets[1].size;
-
+    let mut final_changelog = String::new();
     
+    let mut current = match util::get_plugin_version() {
+        Some(v) => {
+            println!("version is : {}", v);
+            v
+        },
+        None => {
+            println!("could not determine current version!");
+            let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! We will perform a full install! </div>";
+            show_verification_results(html_output, session);
+            Version::new(0,0,0)
+        }
+    };
 
-    let session2 = session as *const WebSession as u64;
-    let mut writer = std::io::BufWriter::with_capacity(
-        0x40_0000,
-        std::fs::File::create("sd:/download.zip").unwrap()
-    );
-    let (tx, rx) = mpsc::channel();
-    let ui_updater = std::thread::spawn(move || {
-        let session = unsafe { &*(session2 as *const WebSession) };
-        loop {
+    let latest = match util::get_latest_version(session, is_nightly) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Could not determine latest version due to error: {:?}", e);
+            let html_output = format!("<div id=\\\"changelogContents\\\">Could not determine latest version! Please connect to the internet to update. Error: {:?} </div>", e);
+            show_verification_results(html_output.as_str(), session);
+            return;
+        }
+    };
 
-            let mut value = None;
-            loop {
-                match rx.try_recv() {
-                    Ok(v) => value = Some(v),
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    _ => return
+    // compare versions
+    if latest < current {
+        println!("Somehow your current version ({}) is newer than the latest on the github releases ({}). This should not be possible.", current, latest);
+        let html_output = format!("<div id=\\\"changelogContents\\\">Somehow your current version ({}) is newer than the latest on the github releases ({}). This should not be possible. We cannot update in this state. </div>", current, latest);
+        show_verification_results(html_output.as_str(), session);
+        return;
+    } else if current == latest {
+        println!("You are already on the latest! Current install: {}, Latest: {}", current, latest);
+        let html_output = format!("<div id=\\\"changelogContents\\\">You are already on the latest! Current install: {}, Latest: {}. No Update is necessary. </div>", current, latest);
+        show_verification_results(html_output.as_str(), session);
+        return;
+    } else {
+        println!("we need to update. Current: {}, Latest: {}", current, latest);
+    }
+
+    // walk the chain forever potentially (we have breaking conditions below)
+    while (current != latest) {
+        
+        // delete the old update zip
+        if Path::new("sd:/downloads/hdr-update.zip").exists() {
+            println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
+            std::fs::remove_file("sd:/downloads/hdr-update.zip");
+        }
+
+
+        // try and see if we can get the upgrade.zip file to "walk the chain" of updates.
+        let can_upgrade = match util::download_from_version(is_nightly, "upgrade.zip", "hdr-update.zip", current.clone(), session) {
+            Ok(i) => {
+                println!("we can walk the chain!");
+                true
+            },
+            Err(e) => {
+                println!("error while checking for upgrade.zip: {:?}", e);
+                false
+            }
+        };
+        
+        // if there is no upgrade package available for the current version, then we will just have to perform a full
+        if !can_upgrade {
+            match util::download_from_latest(is_nightly, "switch-package.zip", "hdr-update.zip", session) {
+                Ok(i) => println!("latest full download complete."),
+                Err(e) => {
+                    println!("could not get full download! Error: {:?}", e);
+                    let html_output = format!(
+                        "<div id=\\\"changelogContents\\\">Could not get full install download! Current version: {}, Latest: {}. Update failed. Error: {:?} </div>", current, latest, e);
+                    show_verification_results(html_output.as_str(), session);
+                    return;
                 }
             }
+        }
 
-            if let Some(value) = value {
-                session.send_json(&value);
+        
+        let mut zip = unzipper::get_zip_archive("sd:/downloads/hdr-update.zip").unwrap();
+
+        let count = zip.len();
+
+        for file_no in 0..count {
+            let mut file = zip.by_index(file_no).unwrap();
+            if !file.is_file() {
+                continue;
             }
 
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            session.send_json(&ExtractInfo::new(
+                file_no,
+                count,
+                file.name().trim_start_matches("ultimate/mods/")
+            ));
+
+            let path = Path::new("sd:/").join(file.name());
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent);
+            }
+
+            let mut file_data = vec![];
+            file.read_to_end(&mut file_data).unwrap();
+            std::fs::write(path, file_data).unwrap();
         }
+
+        // delete the update zip
+        if Path::new("sd:/downloads/hdr-update.zip").exists() {
+            println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
+            std::fs::remove_file("sd:/downloads/hdr-update.zip");
+        }
+
+
+        // get the newly installed version
+        let new_version = match util::get_plugin_version() {
+            Some(v) => {
+                println!("version is : {}", v);
+                v
+            },
+            None => {
+                println!("could not determine current version!");
+                let html_output = "<div id=\\\"changelogContents\\\">Could not determine new version! Please try to update again. </div>";
+                show_verification_results(html_output, session);
+                return;
+            }
+        };
+
+        // get the current changelog for the version we just installed, and append it
+        final_changelog = format!("{}\n{}", final_changelog, match util::download_from_version(is_nightly, "CHANGELOG.md", "hdr-changelog.md", new_version.clone(), session) {
+            Ok(i) => {
+                // append the eventual changelog text
+                if Path::new("sd:/downloads/hdr-changelog.md").exists() {
+                    match std::fs::read_to_string("sd:/downloads/hdr-changelog.md") {
+                        Ok(s) => s,
+                        Err(e) => format!("Error while getting changelog for new version: {}", new_version)
+
+                    }
+                } else {
+                    format!("Changelog for {} was downloaded but could not be found? This should be impossible. Please report this.", new_version)
+                }
+            },
+            Err(e) => {
+                format!("Changelog for {} could not be downloaded. Please report this.", new_version)
+            }
+        });
+
+        if new_version == latest {
+            break;
+        }
+
+        current = new_version;
+    }
+
+
+    // display the built up changelog
+    let markdown = final_changelog.replace("\\* *This Changelog was automatically generated by [github_changelog_generator](https://github.com/github-changelog-generator/github-changelog-generator)*", "");
+
+    let parser = pulldown_cmark::Parser::new_ext(markdown.as_str(), pulldown_cmark::Options::all());
+    let mut html_output = String::new();
+    pulldown_cmark::html::push_html(&mut html_output, parser);
+
+    html_output = html_output.replace("\"", "\\\"").replace("\n", "\\n");
+    html_output = html_output.replacen(",/a></p>\\n", "</a></p>\\n<hr style=\\\"width:66%\\\"><div id=\\\"changelogContents\\\">", 1);
+
+    std::fs::remove_file("sd:/downloads/hdr-changelog.md");
+
+    session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
+    session.try_send_json(&commands::ChangeMenu::new("text-view"));
+    
+    session.try_send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));    
+}
+
+
+
+enum VerifyResult {
+    Success(commands::VerifyInfo),
+    MissingFile(PathBuf),
+    IncorrectFile(PathBuf)
+}
+
+pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
+    println!("we need to download the hashes to check. is_nightly = {}", is_nightly);
+
+    let version = match util::get_plugin_version() {
+        Some(v) => {
+            println!("version is : {}", v);
+            v
+        },
+        None => {
+            println!("could not determine current version!");
+            let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! Cannot validate! </div>";
+            show_verification_results(html_output, session);
+            return;
+        }
+    };
+
+    if !Path::new("sd:/downloads/").exists() {
+        std::fs::create_dir("sd:/downloads/");
+    }
+
+    util::download_from_version(is_nightly, "content_hashes.txt", "content_hashes.txt", version, session);
+
+    println!("downloaded version");
+    
+    let file_data = std::fs::read_to_string("sd:/downloads/content_hashes.txt").unwrap();
+
+    
+    println!("read to string");
+
+    let (tx, rx) = mpsc::channel();
+
+   
+    let handle = std::thread::spawn(move || {
+        let lines = file_data.lines();
+        let line_count = lines.count();
+        let mut file_hashes = Vec::<(String, String)>::new();
+        
+        let hdr_folders = vec![
+            "sd:/ultimate/mods/hdr",
+            "sd:/ultimate/mods/hdr-stages",
+            "sd:/ultimate/mods/hdr-assets",
+        ];
+
+        // if these files are present, we will *always* delete them
+        let always_delete_files = vec![
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/libsmashline_hook_development.nro",
+        ];
+
+        for file in always_delete_files {
+            if Path::new(file).exists() {
+                println!("deleting file: {}", file);
+                std::fs::remove_file(file);
+            }
+        }
+        
+        let ignore_files = vec!["changelog.toml"];
+
+        let mut deleted_files: Vec<String> = vec![];
+
+        /// file_path : (hash, is_present)
+        let mut files_map = HashMap::new();
+        let mut found_count = 0;
+        
+        // collect all of the allowed paths
+        for (idx, line) in file_data.lines().into_iter().enumerate() {
+            let mut split = line.split(":");
+            let path = match split.next() {
+                Some(x) => x,
+                None => {
+                    println!("Line {} was malformed!", line);
+                    continue;
+                }
+            };
+            let hash = match split.next() {
+                Some(x) => x,
+                None => {
+                    println!("Line {} was malformed!", line);
+                    continue;
+                }
+            };
+    
+            let path = format!("sd:{}", path);
+            //println!("adding to map: {}", path.to_owned());
+            files_map.insert(path.to_owned(), (hash.to_owned(), false));
+        }
+
+        // remove any undesired files during verification
+        for dir in hdr_folders {
+            let walk = walkdir::WalkDir::new(dir);
+            for entry in walk {
+                // handle any errors
+                if entry.is_err() {
+                    println!("error during walk: {:?}", entry.err().unwrap());
+                    continue;
+                }
+
+                let entry = entry.unwrap();
+                let entry_string = entry.path().as_os_str().to_str().unwrap();
+
+                // skip directories
+                if entry.file_type().is_dir() {
+                    continue;
+                }
+                
+                // check if this file path is present in the list of expected files
+                //println!("checking for: {}", entry_string.to_string());
+                let mut found = files_map.contains_key(&entry_string.to_string());
+                
+                if !found {
+                    //println!("entry should be removed: {}", entry_string);
+                    deleted_files.push(entry_string.to_string());
+                } else {
+                    found_count += 1;
+
+                    let hash = files_map.get(&entry_string.to_string()).unwrap().0.clone();
+                    let previously_found = files_map.get(&entry_string.to_string()).unwrap().1;
+
+                    // update this file with true - it has been found already
+                    files_map.insert(entry_string.to_string(), (hash.clone(), true));
+
+                    // check its hash                    
+                    let file_path = Path::new(entry_string);
+                    let data = match std::fs::read(file_path) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            if ignore_files.contains(&file_path.file_name().unwrap().to_str().unwrap()) {
+                                let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(found_count, line_count, format!("{}", file_path.display()))));
+                            } else {
+                                let _ = tx.send(VerifyResult::MissingFile(file_path.to_path_buf()));
+                            }
+                            continue;
+                        }
+                    };
+                    let digest = md5::compute(data);
+                    let digest = format!("{:x}", digest);
+                    if digest != hash {
+                        let _ = tx.send(VerifyResult::IncorrectFile(file_path.to_path_buf()));
+                    } else {
+                        let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(found_count, line_count, entry_string.to_string().trim_start_matches("sd:/ultimate/mods/").to_string())));
+                    }
+                }
+            }
+        }
+
+        
+
+        // collect the rest of the expected (hashed) files which may not have already been encountered during the walkdir
+        for (path, (hash, already_found)) in files_map {
+            if already_found {
+                continue;
+            }
+            found_count += 1;
+
+            // check the hash                    
+            let file_path = Path::new(&path);
+            let data = match std::fs::read(file_path) {
+                Ok(data) => data,
+                Err(e) => {
+                    if ignore_files.contains(&file_path.file_name().unwrap().to_str().unwrap()) {
+                        let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(found_count, line_count, format!("{}", file_path.display()))));
+                    } else {
+                        let _ = tx.send(VerifyResult::MissingFile(file_path.to_path_buf()));
+                    }
+                    continue;
+                }
+            };
+            let digest = md5::compute(data);
+            let digest = format!("{:x}", digest);
+            if digest != hash {
+                let _ = tx.send(VerifyResult::IncorrectFile(file_path.to_path_buf()));
+            } else {
+                let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(found_count, line_count, path.to_string().trim_start_matches("sd:/ultimate/mods/").to_string())));
+            }
+        }
+
+        println!("deleting unwanted files");
+        for file in deleted_files {
+            println!("deleting file: {}", file);
+            std::fs::remove_file(file);
+        }
+
+        println!("verify complete.");
+
     });
-    unsafe {
-        skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 2);
-    }
-    curl::try_curl("https://github.com/HDR-Development/HDR-Nightlies/releases/latest/download/package.zip", &mut writer, session, tx);
-    // curl::try_curl("http://192.168.0.113:8080/HewDraw.Remix.v0.3.7-beta.SWITCH.zip", &mut writer, session);
 
-    drop(writer);
 
-    let mut zip = unzipper::get_zip_archive("sd:/download.zip").unwrap();
-
-    let count = zip.len();
-
-    for file_no in 0..count {
-        let mut file = zip.by_index(file_no).unwrap();
-        if !file.is_file() {
-            continue;
+    let mut missing_files = vec![];
+    let mut bad_files = vec![];
+    loop {
+        let mut value = None;
+        let mut exit = false;
+        loop {
+            match rx.try_recv() {
+                Ok(v) => {
+                    if matches!(&v, VerifyResult::Success(_)) {
+                        value = Some(v);
+                        continue;
+                    } else {
+                        value = Some(v);
+                        break;
+                    }
+                },
+                Err(mpsc::TryRecvError::Empty) => break,
+                _ => {
+                    exit = true;
+                    break;
+                }
+            }
         }
 
-        session.send_json(&ExtractInfo::new(
-            file_no,
-            count,
-            file.name()
-        ));
-
-        let mut file_data = vec![];
-        file.read_to_end(&mut file_data).unwrap();
-        std::fs::write(Path::new("sd:/").join(file.name()), file_data).unwrap();
-    }
-
-    unsafe {
-        skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 16);
-    }
-
-    session.send_json(&Info::new(1.0, "completed", true));
-}
-
-pub fn verify_hdr(session: &WebSession){
-    /*let mut writer = std::io::BufWriter::with_capacity(
-        0x40_00,
-        std::fs::File::create("sd:/content_hashes.txt").unwrap()
-    );*/
-    for i in 1..1001 {
-        let mut info = VerifyInfo::new(i, 1001, "myfile");
-
-        let markdown = TEST_MARKDOWN.replace("\\* *This Changelog was automatically generated by [github_changelog_generator](https://github.com/github-changelog-generator/github-changelog-generator)*", "");
-
-        let parser = pulldown_cmark::Parser::new_ext(markdown.as_str(), pulldown_cmark::Options::all());
-
-        let mut html_output = String::new();
-        pulldown_cmark::html::push_html(&mut html_output, parser);
-/*
-        info.text = html_output.replace("\"", "\\\"").replace("\n", "\\n");
-
-        info.text = info.text.replacen("</a></p>\\n", "</a></p>\\n<hr style=\\\"width:66%\\\"><div id=\\\"changelogContents\\\">", 1);
-        info.text += "</div>";
-*/
-        if session.try_send_json(&info){
-            println!("verifying {}", i);
+        if exit {
+            break;
         }
 
-        thread::sleep(time::Duration::from_millis(20)); 
+        if let Some(value) = value {
+            match value  {
+                VerifyResult::Success(info) => session.send_json(&info),
+                VerifyResult::MissingFile(path) => missing_files.push(path),
+                VerifyResult::IncorrectFile(path) => bad_files.push(path),
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    session.send_json(&Info::new(1.0, "completed", true));
-    println!("verify complete!");
+
+    let mut html_output = String::new();
+
+    if missing_files.is_empty() && bad_files.is_empty() {
+        html_output = "<div id=\\\"changelogContents\\\">There were no issues found with the installation!</div>".to_string();
+    } else {
+        html_output = "<div id=\\\"changelogContents\\\">".to_string();
+        if !missing_files.is_empty() {
+            html_output += "Files not found:<br><ul>";
+            for file in missing_files {
+                html_output += format!("<li><b>{}</b></li>", file.display()).as_str();
+            }
+            html_output += "</ul><br><br>";
+        }
+        if !bad_files.is_empty() {
+            html_output += "Corrupted files:<br><ul>";
+            for file in bad_files {
+                html_output += format!("<li><b>{}</b></li>", file.display()).as_str();
+            }
+            html_output += "</ul><br><br>"
+        }
+        html_output += "</div>";
+    }
+
+    show_verification_results(&html_output, session);
 }
 
-#[derive(Serialize, Debug)]
-pub struct VersionInfo {
-    code: String,
-    romfs: String
+fn show_verification_results(html: &str, session: &WebSession) {
+    session.try_send_json(&commands::ChangeHtml::new("changelog", html));
+    session.try_send_json(&commands::ChangeMenu::new("text-view"));
+    session.try_send_json(&commands::ChangeHtml::new("title", "HDR Launcher > Verification Results"));
 }
 
-pub fn get_romfs_version() -> Option<Version> {
-    std::fs::read_to_string("sd:/ultimate/mods/hdr-assets/ui/romfs_version.txt")
-        .ok()
-        .map(|x| dbg!(Version::parse(x.as_str().trim().trim_start_matches("v"))).ok())
-        .flatten()
-}
 
-pub fn get_plugin_version() -> Option<Version> {
-    std::fs::read_to_string("sd:/ultimate/mods/hdr/ui/plugin_version.txt")
-        .ok()
-        .map(|x| Version::parse(x.as_str().trim().trim_start_matches("v")).ok())
-        .flatten()
-}
 
 #[skyline::main(name = "HDRLauncher")]
 pub fn main() {
+    let mut config = config::get_config();
+    if config::is_enable_skip_launcher(&mut config) {
+        return;
+    }
     // let handle = start_audio_thread();
     curl::install();
 
@@ -300,15 +621,6 @@ pub fn main() {
         );
     }));
 
-    // let (nightly_plugins, nightly_romfs, betas) = std::thread::Builder::new()
-    //     .stack_size(0x40_000)
-    //     .spawn(|| {
-    //         let plugins = github::get_all_releases_for_repository("HDR-Development", "HewDraw-Remix").unwrap();
-    //         let romfs = github::get_all_releases_for_repository("HDR-Development", "romfs-release").unwrap();
-    //         let betas = github::get_all_releases_for_repository("HDR-Development", "HDR-Releases").unwrap();
-    //         (plugins, romfs, betas)
-    //     }).unwrap().join().unwrap();
-
     let mut wav = WavReader::new(std::io::Cursor::new(BGM_WAV)).unwrap();
     let samples: Vec<i16> = wav.samples::<i16>().map(|x| x.unwrap()).collect();
     let audio = LoopingAudio::new(
@@ -316,6 +628,7 @@ pub fn main() {
         151836 * 2,
         1776452 * 2,
         0.5,
+        0.0,
         30,
         3.0
     );
@@ -337,12 +650,13 @@ pub fn main() {
             .file("style.css", &CSS_TEXT)
             .file("logo.png", &LOGO_PNG)
             .file("cursor-move.wav", &CURSOR_MOVE_WAV)
+            .file("failure.wav", &FAILURE_WAV)
             .file("start.wav", &START_WAV)
             .background(skyline_web::Background::Default)
             .boot_display(skyline_web::BootDisplay::Black)
             .open_session(skyline_web::Visibility::InitiallyHidden).unwrap();
         
-        session.show();
+        
 
         let signal = audio.start();
 
@@ -350,19 +664,38 @@ pub fn main() {
             if let Some(msg) = session.try_recv() {
                 match msg.as_str() {
                     "load" => {
+                        let plugin_version = util::get_plugin_version().map(|x| x.to_string()).unwrap_or("???".to_string());
+                        let romfs_version = get_romfs_version().map(|x| x.to_string()).unwrap_or("???".to_string());
                         session.send_json(&VersionInfo {
-                            code: get_plugin_version().map(|x| x.to_string()).unwrap_or("???".to_string()),
-                            romfs: get_romfs_version().map(|x| x.to_string()).unwrap_or("???".to_string())
+                            code: plugin_version.clone(),
+                            romfs: romfs_version.clone()
                         });
+                        if !Path::new("sd:/ultimate/mods/hdr").exists() {
+                            session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Install&nbsp;&nbsp;</text></div>"));
+                            session.send_json(&commands::ChangeHtml::new("play-button", "<div><text>Vanilla&nbsp;&nbsp;</text></div>"));
+                            session.send_json(&commands::ChangeMenu::new("main-menu"));
+                        }
+                        session.send_json(&commands::SetOptionStatus::new(
+                            "nightlies",
+                            config::is_enable_nightly_builds(&config)
+                        ));
+                        session.send_json(&commands::SetOptionStatus::new(
+                            "skip_on_launch",
+                            config::is_enable_skip_launcher(&config)
+                        ));
                     }
                     "start" => {
                         println!("starting hdr...");
                         end_session_and_launch(&session, signal);
                         break;
                     }
-                    "verify_hdr" => verify_hdr(&session),
-                    "update_hdr" => update_hdr(&session),
-                    "version_select" => verify_hdr(&session),
+                    "restart" => {
+                        restart(&session, signal);
+                        break;
+                    }
+                    "verify_hdr" => verify_hdr(&session, config::is_enable_nightly_builds(&config)),
+                    "update_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config)),
+                    "version_select" => verify_hdr(&session,config::is_enable_nightly_builds(&config)),
                     "exit" => {
                         println!("exiting!");
                         unsafe { skyline::nn::oe::ExitApplication() }
@@ -370,6 +703,18 @@ pub fn main() {
                     x if x.starts_with("log:") => {
                         println!("{}", x.trim_start_matches("log:"));
                     },
+                    x if x.starts_with("toggle:") => {
+                        let option = x.trim_start_matches("toggle:");
+                        if option == "nightlies" {
+                            let is_enabled = config::is_enable_nightly_builds(&config);
+                            config::enable_nightlies(&mut config, !is_enabled);
+                            session.send_json(&commands::SetOptionStatus::new("nightlies", !is_enabled));
+                        } else if option == "skip_on_launch" {
+                            let is_enabled = config::is_enable_skip_launcher(&config);
+                            config::enable_skip_launcher(&mut config, !is_enabled);
+                            session.send_json(&commands::SetOptionStatus::new("skip_on_launch", !is_enabled));
+                        }
+                    }
                     _ => {}
                 };
 
