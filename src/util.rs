@@ -64,7 +64,7 @@ pub fn restart(session: &WebSession, signal: Sender<AsyncCommand>) {
     }
 }
 
-pub fn download_from_latest(is_nightly: bool, artifact_name: &str, created_file_name: &str, session: &WebSession) -> std::io::Result<()> {
+pub fn download_from_latest(is_nightly: bool, artifact_name: &str, created_file_name: &str, session: Option<&WebSession>) -> std::io::Result<()> {
 
     println!("we need to download the hdr update. is_nightly = {}", is_nightly);
     let mut url = String::new();
@@ -83,7 +83,7 @@ pub fn download_from_latest(is_nightly: bool, artifact_name: &str, created_file_
     
 }
 
-pub fn download_from_version(is_nightly: bool, artifact_name: &str, created_file_name: &str, version: Version, session: &WebSession) -> std::io::Result<()> {
+pub fn download_from_version(is_nightly: bool, artifact_name: &str, created_file_name: &str, version: Version, session: Option<&WebSession>) -> std::io::Result<()> {
 
     let mut url = String::new();
     if is_nightly {
@@ -100,7 +100,7 @@ pub fn download_from_version(is_nightly: bool, artifact_name: &str, created_file
     download_file(url_str, format!("sd:/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())
 }
 
-pub fn get_latest_version(session: &WebSession, is_nightly: bool) -> Result<Version, Error> {
+pub fn get_latest_version(session: Option<&WebSession>, is_nightly: bool) -> Result<Version, Error> {
     match download_from_latest(is_nightly, "hdr_version.txt", "hdr_version.txt", session) {
         Ok(i) => println!("latest version info downloaded!"),
         Err(e) => {
@@ -125,18 +125,26 @@ pub fn get_latest_version(session: &WebSession, is_nightly: bool) -> Result<Vers
 }
 
 
-pub fn download_file(url: &str, path: &str, session: &WebSession, file_name: String) -> std::io::Result<()> {
+pub fn download_file(url: &str, path: &str, session: Option<&WebSession>, file_name: String) -> std::io::Result<()> {
     // unsafe {
     //     block_home_button();
     //     block_home_button_short();
     // }
     
 
-    let session2 = session as *const WebSession as u64;
+    let session2 = if let Some(session) = session.as_ref() {
+        *session as *const WebSession as u64
+    } else {
+        0
+    };
 
     let (tx, rx) = mpsc::channel();
     let ui_updater = std::thread::spawn(move || {
-        let session = unsafe { &*(session2 as *const WebSession) };
+        let session = if session2 == 0 {
+            None
+        } else {
+            unsafe { Some(&*(session2 as *const WebSession)) }
+        };
         loop {
             let mut value: Option<DownloadInfo> = None;
             loop {
@@ -147,9 +155,11 @@ pub fn download_file(url: &str, path: &str, session: &WebSession, file_name: Str
                 }
             }
 
-            if let Some(mut value) = value {
-                value.item_name = file_name.as_str();
-                println!("{}", session.try_send_json(&value));
+            if let Some(session) = session.as_ref() {
+                if let Some(mut value) = value {
+                    value.item_name = file_name.as_str();
+                    println!("{}", session.try_send_json(&value));
+                }
             }
 
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -172,23 +182,39 @@ pub fn download_file(url: &str, path: &str, session: &WebSession, file_name: Str
     );
 
     println!("trying curl with url: {}", url);
-    match crate::curl::try_curl(url, &mut writer, session, tx) {
-        Ok(i) => println!("download is successful"),
+
+    let result = if let Some(session) = session {
+        crate::curl::try_curl(url, &mut writer, session, tx)
+    } else {
+        std::mem::drop(tx);
+        crate::curl::try_curl_maidenless(url, &mut writer)
+    };
+
+    writer.flush();
+    std::mem::drop(writer);
+
+    match result {
+        Ok(_) => {
+            if confirm_file_is_valid(path) {
+                println!("download is successful");
+            } else {
+                return Err(Error::new(ErrorKind::Other, format!("Error while trying to download! Not found")));
+            }
+        },
         Err(e) => {
             println!("error during download");
             return Err(Error::new(ErrorKind::Other, format!("Error while trying to download! code: {}", e)));
         }
     };
 
-    // unsafe {
-    //     skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 16);
-    // }
+    unsafe {
+        skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 16);
+    }
 
     println!("download complete.");    
 
     ui_updater.join();
 
-    writer.flush();
     // unsafe {
     //     allow_home_button();
     //     allow_home_button_short();
@@ -196,4 +222,35 @@ pub fn download_file(url: &str, path: &str, session: &WebSession, file_name: Str
 
     
     Ok(())
+}
+
+pub fn should_version_swap(config: &StorageHolder<SdCardStorage>) -> bool {
+    let current_version = get_plugin_version();
+    if let Some(current_version) = current_version {
+        let compare_to = if config::is_enable_nightly_builds(config) {
+            "nightly"
+        } else {
+            "beta"
+        };
+
+        current_version.pre.as_str() != compare_to
+    } else {
+        false
+    }
+}
+
+pub fn confirm_file_is_valid<P: AsRef<Path>>(path: P) -> bool {
+    let path = path.as_ref();
+    if std::fs::metadata(path).map(|x| x.len()).unwrap_or(0) == 0 {
+        println!("{} is 0", path.display());
+        return false;
+    }
+
+    if let Ok(string) = std::fs::read_to_string(path) {
+        println!("file is valid? {}", string != "Not Found");
+        string != "Not Found"
+    } else {
+        println!("file is valid");
+        true
+    }
 }

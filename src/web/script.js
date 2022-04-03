@@ -351,6 +351,8 @@ function updateProgressByDownload(download_info) {
 
     var bps = formatBPS(download_info["bps"]);
     var progress = download_info["bytes_downloaded"] / download_info["total_bytes"];
+    if (download_info["total_bytes"] === 0)
+        progress = 0.0;
     var progress_bar = document.getElementById("progress");
     progress_bar.style.backgroundColor = "var(--main-progress-download-color)";
     progress_bar.style.width = `${progress * 100}%`;
@@ -387,6 +389,8 @@ function changeMenuByCommand(change_menu) {
         viewMainMenu();
     } else if (change_menu["going_to"] === "text-view") {
         viewChangelog();
+    } else if (change_menu["going_to"] === "progress") {
+        viewProgress();
     }
 }
 

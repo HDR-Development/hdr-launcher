@@ -18,6 +18,8 @@ mod util;
 use hound::WavReader;
 use looping_audio::{LoopingAudio, AsyncCommand};
 use semver::Version;
+use skyline::nn::hid::NpadHandheldState;
+use skyline_config::{StorageHolder, SdCardStorage};
 // use skyline::{hook, install_hook};
 use skyline_web::{Webpage, WebSession};
 use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write, BufRead, Error, ErrorKind}, path::{Path, PathBuf}};
@@ -166,13 +168,13 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         },
         None => {
             println!("could not determine current version!");
-            let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! We will perform a full install! </div>";
-            show_verification_results(html_output, session);
+            // let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! We will perform a full install! </div>";
+            // show_verification_results(html_output, session);
             Version::new(0,0,0)
         }
     };
 
-    let latest = match util::get_latest_version(session, is_nightly) {
+    let latest = match util::get_latest_version(Some(session), is_nightly) {
         Ok(v) => v,
         Err(e) => {
             println!("Could not determine latest version due to error: {:?}", e);
@@ -208,7 +210,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
 
 
         // try and see if we can get the upgrade.zip file to "walk the chain" of updates.
-        let can_upgrade = match util::download_from_version(is_nightly, "upgrade.zip", "hdr-update.zip", current.clone(), session) {
+        let can_upgrade = match util::download_from_version(is_nightly, "upgrade.zip", "hdr-update.zip", current.clone(), Some(session)) {
             Ok(i) => {
                 println!("we can walk the chain!");
                 true
@@ -221,7 +223,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         
         // if there is no upgrade package available for the current version, then we will just have to perform a full
         if !can_upgrade {
-            match util::download_from_latest(is_nightly, "switch-package.zip", "hdr-update.zip", session) {
+            match util::download_from_latest(is_nightly, "switch-package.zip", "hdr-update.zip", Some(session)) {
                 Ok(i) => println!("latest full download complete."),
                 Err(e) => {
                     println!("could not get full download! Error: {:?}", e);
@@ -282,7 +284,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
         };
 
         // get the current changelog for the version we just installed, and append it
-        final_changelog = format!("{}\n{}", final_changelog, match util::download_from_version(is_nightly, "CHANGELOG.md", "hdr-changelog.md", new_version.clone(), session) {
+        final_changelog = format!("{}\n{}", final_changelog, match util::download_from_version(is_nightly, "CHANGELOG.md", "hdr-changelog.md", new_version.clone(), Some(session)) {
             Ok(i) => {
                 // append the eventual changelog text
                 if Path::new("sd:/downloads/hdr-changelog.md").exists() {
@@ -320,10 +322,15 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
 
     std::fs::remove_file("sd:/downloads/hdr-changelog.md");
 
-    session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
-    session.try_send_json(&commands::ChangeMenu::new("text-view"));
+    if verify_hdr(session, is_nightly) {
+        session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
+        session.try_send_json(&commands::ChangeMenu::new("text-view"));
     
-    session.try_send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));    
+        session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Update&nbsp;&nbsp;</text>"));
+    }
+
+    
+    session.try_send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));
 }
 
 
@@ -334,7 +341,7 @@ enum VerifyResult {
     IncorrectFile(PathBuf)
 }
 
-pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
+pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
     println!("we need to download the hashes to check. is_nightly = {}", is_nightly);
 
     let version = match util::get_plugin_version() {
@@ -346,7 +353,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
             println!("could not determine current version!");
             let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! Cannot validate! </div>";
             show_verification_results(html_output, session);
-            return;
+            return false;
         }
     };
 
@@ -354,7 +361,15 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
         std::fs::create_dir("sd:/downloads/");
     }
 
-    util::download_from_version(is_nightly, "content_hashes.txt", "content_hashes.txt", version, session);
+    match util::download_from_version(is_nightly, "content_hashes.txt", "content_hashes.txt", version, Some(session)) {
+        Ok(_) => {},
+        Err(e) => {
+            println!("error: {:?}", e);
+            show_verification_results("<b>Failed to download content hashes, please return to the main menu</b>", session);
+            session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Fix HDR&nbsp;&nbsp;</text>"));
+            return false;
+        }
+    }
 
     println!("downloaded version");
     
@@ -418,6 +433,10 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
             let path = format!("sd:{}", path);
             //println!("adding to map: {}", path.to_owned());
             files_map.insert(path.to_owned(), (hash.to_owned(), false));
+        }
+
+        if files_map.len() == 0 {
+            return;
         }
 
         // remove any undesired files during verification
@@ -561,9 +580,13 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
 
     let mut html_output = String::new();
 
-    if missing_files.is_empty() && bad_files.is_empty() {
+    let result = if missing_files.is_empty() && bad_files.is_empty() {
         html_output = "<div id=\\\"changelogContents\\\">There were no issues found with the installation!</div>".to_string();
+        true
     } else {
+        // our verification failed
+        session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Fix HDR&nbsp;&nbsp;</text></div>"));
+        let _ = std::fs::write("sd:/ultimate/mods/hdr/ui/hdr_version.txt", "v0.0.0-invalid");
         html_output = "<div id=\\\"changelogContents\\\">".to_string();
         if !missing_files.is_empty() {
             html_output += "Files not found:<br><ul>";
@@ -580,9 +603,11 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) {
             html_output += "</ul><br><br>"
         }
         html_output += "</div>";
-    }
+        false
+    };
 
     show_verification_results(&html_output, session);
+    result
 }
 
 fn show_verification_results(html: &str, session: &WebSession) {
@@ -591,16 +616,49 @@ fn show_verification_results(html: &str, session: &WebSession) {
     session.try_send_json(&commands::ChangeHtml::new("title", "HDR Launcher > Verification Results"));
 }
 
+fn check_if_show_launcher(config: &StorageHolder<SdCardStorage>) -> bool {
+    if !config::is_enable_skip_launcher(&config) {
+        return true;
+    }
 
+    let plugin_version = util::get_plugin_version();
+    if plugin_version.is_none() {
+        skyline_web::DialogOk::ok("HDR is not installed. You will be directed to the HDR launcher.");
+        return true;
+    }
+
+    let plugin_version = plugin_version.unwrap();
+
+    let latest_version = util::get_latest_version(None, config::is_enable_nightly_builds(&config));
+    if latest_version.is_err() {
+        skyline_web::DialogOk::ok("Unable to get the latest version of HDR. You will be directed to the HDR launcher.");
+        return true;
+    }
+
+    let latest_version = latest_version.unwrap();
+    if latest_version != plugin_version {
+        skyline_web::DialogOk::ok("There is an update for HDR. You will be directed to the HDR launcher.");
+        return true;
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    if ninput::any::is_down(ninput::Buttons::X) {
+        return true;
+    }
+
+    false
+}
 
 #[skyline::main(name = "HDRLauncher")]
 pub fn main() {
+    ninput::init();
+    curl::install();
+
     let mut config = config::get_config();
-    if config::is_enable_skip_launcher(&mut config) {
+    if !check_if_show_launcher(&config) {
         return;
     }
     // let handle = start_audio_thread();
-    curl::install();
 
     std::panic::set_hook(Box::new(|info| {
         let location = info.location().unwrap();
@@ -674,6 +732,10 @@ pub fn main() {
                             session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Install&nbsp;&nbsp;</text></div>"));
                             session.send_json(&commands::ChangeHtml::new("play-button", "<div><text>Vanilla&nbsp;&nbsp;</text></div>"));
                             session.send_json(&commands::ChangeMenu::new("main-menu"));
+                        } else if plugin_version == "???" || plugin_version == "0.0.0-invalid" {
+                            session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Fix HDR&nbsp;&nbsp;</text>"));
+                        } else if util::should_version_swap(&config) {
+                            session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Install&nbsp;&nbsp;</text>"));
                         }
                         session.send_json(&commands::SetOptionStatus::new(
                             "nightlies",
@@ -693,9 +755,10 @@ pub fn main() {
                         restart(&session, signal);
                         break;
                     }
-                    "verify_hdr" => verify_hdr(&session, config::is_enable_nightly_builds(&config)),
+                    "verify_hdr" => {
+                        let _ = verify_hdr(&session, config::is_enable_nightly_builds(&config));
+                    },
                     "update_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config)),
-                    "version_select" => verify_hdr(&session,config::is_enable_nightly_builds(&config)),
                     "exit" => {
                         println!("exiting!");
                         unsafe { skyline::nn::oe::ExitApplication() }
@@ -709,6 +772,11 @@ pub fn main() {
                             let is_enabled = config::is_enable_nightly_builds(&config);
                             config::enable_nightlies(&mut config, !is_enabled);
                             session.send_json(&commands::SetOptionStatus::new("nightlies", !is_enabled));
+                            if util::should_version_swap(&config) {
+                                session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Install&nbsp;&nbsp;</text>"));
+                            } else {
+                                session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Update&nbsp;&nbsp;</text>"));
+                            }
                         } else if option == "skip_on_launch" {
                             let is_enabled = config::is_enable_skip_launcher(&config);
                             config::enable_skip_launcher(&mut config, !is_enabled);
