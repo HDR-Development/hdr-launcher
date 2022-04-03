@@ -185,7 +185,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
     };
 
     // compare versions
-    if latest < current {
+    if latest < current && latest.pre == current.pre {
         println!("Somehow your current version ({}) is newer than the latest on the github releases ({}). This should not be possible.", current, latest);
         let html_output = format!("<div id=\\\"changelogContents\\\">Somehow your current version ({}) is newer than the latest on the github releases ({}). This should not be possible. We cannot update in this state. </div>", current, latest);
         show_verification_results(html_output.as_str(), session);
