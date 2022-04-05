@@ -330,7 +330,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
 
     std::fs::remove_file("sd:/downloads/hdr-changelog.md");
 
-    if verify_hdr(session, is_nightly) {
+    if verify_hdr(session, is_nightly).is_ok() {
         session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
         session.try_send_json(&commands::ChangeMenu::new("text-view"));
     
@@ -346,11 +346,20 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
 enum VerifyResult {
     Success(commands::VerifyInfo),
     MissingFile(PathBuf),
+    DisabledPlugin(PathBuf),
     IncorrectFile(PathBuf)
 }
 
-pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
+/// 
+/// this function will verify hdr to make sure that everything is ok
+/// 
+/// returns:
+/// String - a warning/info output string, which may be worth displaying (if you are about to display a different UI than the one this generates)
+/// Error - potentially an Error
+/// 
+pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std::io::Error> {
     println!("we need to download the hashes to check. is_nightly = {}", is_nightly);
+    let mut return_string = String::new();
 
     let version = match util::get_plugin_version() {
         Some(v) => {
@@ -361,7 +370,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
             println!("could not determine current version!");
             let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! Cannot validate! </div>";
             show_verification_results(html_output, session);
-            return false;
+            return Err(Error::new(ErrorKind::Other, "Could not determine version"));
         }
     };
 
@@ -373,9 +382,9 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
         Ok(_) => {},
         Err(e) => {
             println!("error: {:?}", e);
-            show_verification_results("<b>Failed to download content hashes, please return to the main menu</b>", session);
+            show_verification_results("<b>Failed to download HDR hash file in order to validate the installation. This is likely an internet connection problem.</b>", session);
             session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Fix HDR&nbsp;&nbsp;</text>"));
-            return false;
+            return Err(Error::new(ErrorKind::Other, "Could not download the expected hash file"));
         }
     }
 
@@ -400,16 +409,29 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
             "sd:/ultimate/mods/hdr-assets",
         ];
 
-        // if these files are present, we will *always* delete them
-        let always_delete_files = vec![
-            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/libsmashline_hook_development.nro",
-            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/libhdr.nro",
+        
+        // if these files are present, we will always move them into disabled_plugins
+        let always_disable_plugins = vec![
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libsmashline_hook_development.nro",
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libhdr.nro",
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libnn_hid_hook",
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libparam_hook.nro",
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libtraining_modpack.nro",
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libHDR-Launcher.nro",
         ];
 
-        for file in always_delete_files {
+        let mut disabled_plugins = vec![];
+        for file in always_disable_plugins {
             if Path::new(file).exists() {
-                println!("deleting file: {}", file);
+                println!("disabling plugin: {}", file);
+                if !Path::new("sd:/atmosphere/contents/01006a800016e000/romfs/skyline/disabled_plugins").exists() {
+                    std::fs::create_dir_all("sd:/atmosphere/contents/01006a800016e000/romfs/skyline/disabled_plugins");
+                }
+                std::fs::copy(file, format!("sd:/atmosphere/contents/01006a800016e000/romfs/skyline/disabled_plugins/{}",
+                    file.trim_start_matches("sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/")));
                 std::fs::remove_file(file);
+                disabled_plugins.push(file.clone());
+                let _ = tx.send(VerifyResult::DisabledPlugin(Path::new(file).to_path_buf()));
             }
         }
         
@@ -537,7 +559,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
             }
         }
 
-        println!("deleting unwanted files");
+        println!("deleting unwanted hdr files");
         for file in deleted_files {
             println!("deleting file: {}", file);
             std::fs::remove_file(file);
@@ -550,6 +572,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
 
     let mut missing_files = vec![];
     let mut bad_files = vec![];
+    let mut disabled_plugins = vec![];
     loop {
         let mut value = None;
         let mut exit = false;
@@ -581,6 +604,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
                 VerifyResult::Success(info) => session.send_json(&info),
                 VerifyResult::MissingFile(path) => missing_files.push(path),
                 VerifyResult::IncorrectFile(path) => bad_files.push(path),
+                VerifyResult::DisabledPlugin(path) => disabled_plugins.push(path),
             }
         }
 
@@ -589,14 +613,36 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
 
     let mut html_output = String::new();
 
+
+    // check for development.nro real quick
+    let mut has_dev_nro = Path::new("sd:/atmosphere/contents/01006a800016e000/romfs/smashline/development.nro").exists();
+
     let result = if missing_files.is_empty() && bad_files.is_empty() {
-        html_output = "<div id=\\\"changelogContents\\\">There were no issues found with the installation!</div>".to_string();
-        true
+        html_output = "<div id=\\\"changelogContents\\\">There were no major problems found with the installation!".to_string();
+        if !disabled_plugins.is_empty() {
+            html_output += "The following plugins were automatically moved to disabled_plugins:<br><ul>";
+            for file in disabled_plugins {
+                html_output += format!("<li><b>{}</b></li>", file.display()).as_str();
+            }
+            html_output += "</ul><br><br>";
+        }
+        if has_dev_nro {
+            html_output += "<br>There is also a development.nro on this installation which may be a mistake! Proceed at your own peril.<br>";
+        }
+        html_output += "</div>";
+        Ok(return_string.clone())
     } else {
         // our verification failed
         session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Fix HDR&nbsp;&nbsp;</text></div>"));
         let _ = std::fs::write("sd:/ultimate/mods/hdr/ui/hdr_version.txt", "v0.0.0-invalid");
         html_output = "<div id=\\\"changelogContents\\\">".to_string();
+        if !disabled_plugins.is_empty() {
+            html_output += "The following plugins were automatically moved to disabled_plugins:<br><ul>";
+            for file in disabled_plugins {
+                html_output += format!("<li><b>{}</b></li>", file.display()).as_str();
+            }
+            html_output += "</ul><br><br>";
+        }
         if !missing_files.is_empty() {
             html_output += "Files not found:<br><ul>";
             for file in missing_files {
@@ -611,8 +657,11 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
             }
             html_output += "</ul><br><br>"
         }
+        if has_dev_nro {
+            html_output += "<br>There is also a development.nro on this installation which may be a mistake! Proceed at your own peril.<br>";
+        }
         html_output += "</div>";
-        false
+        Err(Error::new(ErrorKind::Other, return_string.clone()))
     };
 
     show_verification_results(&html_output, session);

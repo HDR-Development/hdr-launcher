@@ -1,5 +1,5 @@
 [package]
-name = "HDRLauncher"
+name = "hdr-launcher"
 version = "0.1.0"
 authors = ["HDR Development Team"]
 edition = "2018"
