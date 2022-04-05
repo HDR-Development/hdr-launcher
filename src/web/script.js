@@ -464,8 +464,10 @@ window.onload = () => {
             var versioning_string = `HDR | Code: ${info["code"]} | Assets: ${info["romfs"]}`;
             document.getElementById("title").innerHTML = versioning_string;
         } else if (info["tag"] === "extract-update") {
+            activeMenu = "progress";
             updateProgressByExtraction(info);
         } else if (info["tag"] === "verify-install") {
+            activeMenu = "progress";
             updateProgressByVerify(info);
         } else if (info["tag"] === "start-game") {
             startGame();

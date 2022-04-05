@@ -235,8 +235,16 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
             }
         }
 
+        session.send_json(&commands::ChangeHtml::new("progressText", "Parsing package metadata...<br>Do not exit the menu"));
+
         
-        let mut zip = unzipper::get_zip_archive("sd:/downloads/hdr-update.zip").unwrap();
+        let mut zip = match unzipper::get_zip_archive("sd:/downloads/hdr-update.zip") {
+            Ok(zip) => zip,
+            Err(_) => {
+                session.send_json(&commands::ChangeHtml::new("progressText", "Failed to parse package metadata..."));
+                return;
+            }
+        };
 
         let count = zip.len();
 
@@ -395,6 +403,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> bool {
         // if these files are present, we will *always* delete them
         let always_delete_files = vec![
             "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/libsmashline_hook_development.nro",
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/libhdr.nro",
         ];
 
         for file in always_delete_files {
