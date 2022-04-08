@@ -418,6 +418,8 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std:
             "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libparam_hook.nro",
             "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libtraining_modpack.nro",
             "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libHDR-Launcher.nro",
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libnn_hid_hook.nro",
+            "sd:/atmosphere/contents/01006a800016e000/romfs/skyline/plugins/libacmd_hook.nro",
         ];
 
         let mut disabled_plugins = vec![];
