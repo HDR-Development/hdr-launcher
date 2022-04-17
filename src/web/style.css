@@ -216,6 +216,20 @@ body {
     box-sizing: border-box;
 }
 
+.options-button {
+    position: relative;
+    display: block;
+    margin-bottom: 1%;
+    height: 80px;
+    border: 5px solid rgb(17, 100, 17);
+    text-align: center;
+    background-color: rgb(68, 68, 68);
+    color: rgb(255, 255, 255);
+    padding: 5;
+    position: relative;
+    box-sizing: border-box;
+}
+
 .flex-item>.item-container {
     width: 100%;
     display: block;

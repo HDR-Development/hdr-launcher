@@ -16,6 +16,7 @@ mod util;
 
 // use github::GithubRelease;
 use hound::WavReader;
+use arcropolis_api::{self, ApiVersion, get_api_version};
 use looping_audio::{LoopingAudio, AsyncCommand};
 use semver::Version;
 use skyline::nn::hid::NpadHandheldState;
@@ -152,13 +153,52 @@ pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>
     session.wait_for_exit();
 }
 
-
-pub fn update_hdr(session: &WebSession, is_nightly: bool) {
-    println!("beginning update!");
+pub fn is_update_available(session: &WebSession, is_nightly: bool) -> bool {
     if !Path::new("sd:/downloads/").exists() {
         std::fs::create_dir("sd:/downloads/");
     }
+    
+    let mut current = match util::get_plugin_version() {
+        Some(v) => {
+            println!("version is : {}", v);
+            v
+        },
+        None => {
+            println!("could not determine current version!");
+            // let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! We will perform a full install! </div>";
+            // show_verification_results(html_output, session);
+            Version::new(0,0,0)
+        }
+    };
 
+    let latest = match util::get_latest_version(Some(session), is_nightly) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Could not determine latest version due to error: {:?}", e);
+            return false;
+        }
+    };
+
+    // compare versions
+    if latest < current && latest.pre == current.pre {
+        println!("Somehow your current version ({}) is newer than the latest on the github releases ({}). This should not be possible.", current, latest);
+        false
+    } else if current == latest {
+        println!("You are already on the latest! Current install: {}, Latest: {}", current, latest);
+        false
+    } else {
+        println!("updates are available!");
+        true
+    }
+}
+
+
+/// updates the hdr installation
+pub fn update_hdr(session: &WebSession, is_nightly: bool, needs_full_redownload: bool) {
+    println!("beginning update! is_nightly: {}, full redownload: {}", is_nightly, needs_full_redownload);
+    if !Path::new("sd:/downloads/").exists() {
+        std::fs::create_dir("sd:/downloads/");
+    }
     let mut final_changelog = String::new();
     
     let mut current = match util::get_plugin_version() {
@@ -173,6 +213,11 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool) {
             Version::new(0,0,0)
         }
     };
+
+    // if we know we need to do a full redownload anyway, then mark our version as invalid
+    if needs_full_redownload {
+        current = Version::new(0,0,0);
+    }
 
     let latest = match util::get_latest_version(Some(session), is_nightly) {
         Ok(v) => v,
@@ -397,7 +442,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std:
 
     let (tx, rx) = mpsc::channel();
 
-   
+    
     let handle = std::thread::spawn(move || {
         let lines = file_data.lines();
         let line_count = lines.count();
@@ -437,7 +482,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std:
             }
         }
         
-        let ignore_files = vec!["changelog.toml"];
+        let ignore_files = vec!["changelog.toml", "libarcropolis.nro", "hdr-launcher.nro"];
 
         let mut deleted_files: Vec<String> = vec![];
 
@@ -546,15 +591,17 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std:
                 Err(e) => {
                     if ignore_files.contains(&file_path.file_name().unwrap().to_str().unwrap()) {
                         let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(found_count, line_count, format!("{}", file_path.display()))));
+                        println!("ignoring missing file:{}", file_path.file_name().unwrap().to_str().unwrap());
                     } else {
                         let _ = tx.send(VerifyResult::MissingFile(file_path.to_path_buf()));
+                        println!("could not find:{}", file_path.file_name().unwrap().to_str().unwrap());
                     }
                     continue;
                 }
             };
             let digest = md5::compute(data);
             let digest = format!("{:x}", digest);
-            if digest != hash {
+            if digest != hash && !ignore_files.contains(&file_path.file_name().unwrap().to_str().unwrap()) {
                 let _ = tx.send(VerifyResult::IncorrectFile(file_path.to_path_buf()));
             } else {
                 let _ = tx.send(VerifyResult::Success(commands::VerifyInfo::new(found_count, line_count, path.to_string().trim_start_matches("sd:/ultimate/mods/").to_string())));
@@ -615,9 +662,34 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std:
 
     let mut html_output = String::new();
 
+    // build the output info about what's enabled or not
 
     // check for development.nro real quick
     let mut has_dev_nro = Path::new("sd:/atmosphere/contents/01006a800016e000/romfs/smashline/development.nro").exists();
+    let mut enabled_info = "".to_string();
+/*
+    // check if hdr is enabled
+    let mut hdr_enabled = unsafe { arcrop_is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr").as_u64()) };
+    let mut hdr_assets_enabled = unsafe { arcrop_is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-assets").as_u64()) };
+    let mut hdr_stages_enabled = unsafe { arcrop_is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-stages").as_u64()) };
+    let mut hdr_dev_enabled = unsafe { arcrop_is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-dev").as_u64()) };
+
+    if !hdr_enabled {
+        enabled_info += "<br>The main hdr mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+    }
+    if !hdr_assets_enabled {
+        enabled_info += "<br>The hdr-assets mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+    }
+    if !hdr_stages_enabled {
+        enabled_info += "<br>The hdr-stages mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+    }
+    if hdr_dev_enabled {
+        enabled_info += "<br>hdr-dev is currently enabled! Be aware that this is not currently an official build.<br>";
+    }
+*/
+    if has_dev_nro {
+        enabled_info += "<br>There is also a development.nro on this installation which may be a mistake! Proceed at your own peril.<br>";
+    }
 
     let result = if missing_files.is_empty() && bad_files.is_empty() {
         html_output = "<div id=\\\"changelogContents\\\">There were no major problems found with the installation!".to_string();
@@ -628,15 +700,13 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std:
             }
             html_output += "</ul><br><br>";
         }
-        if has_dev_nro {
-            html_output += "<br>There is also a development.nro on this installation which may be a mistake! Proceed at your own peril.<br>";
-        }
+        html_output += format!("{}", enabled_info).as_str();
         html_output += "</div>";
         Ok(return_string.clone())
     } else {
         // our verification failed
         session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Fix HDR&nbsp;&nbsp;</text></div>"));
-        let _ = std::fs::write("sd:/ultimate/mods/hdr/ui/hdr_version.txt", "v0.0.0-invalid");
+        //let _ = std::fs::write("sd:/ultimate/mods/hdr/ui/hdr_version.txt", "v0.0.0-invalid");
         html_output = "<div id=\\\"changelogContents\\\">".to_string();
         if !disabled_plugins.is_empty() {
             html_output += "The following plugins were automatically moved to disabled_plugins:<br><ul>";
@@ -659,9 +729,7 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std:
             }
             html_output += "</ul><br><br>"
         }
-        if has_dev_nro {
-            html_output += "<br>There is also a development.nro on this installation which may be a mistake! Proceed at your own peril.<br>";
-        }
+        html_output += format!("{}", enabled_info).as_str();
         html_output += "</div>";
         Err(Error::new(ErrorKind::Other, return_string.clone()))
     };
@@ -709,6 +777,10 @@ fn check_if_show_launcher(config: &StorageHolder<SdCardStorage>) -> bool {
     false
 }
 
+extern "C" {
+    fn arcrop_show_mod_manager();
+}
+
 #[skyline::main(name = "HDRLauncher")]
 pub fn main() {
     ninput::init();
@@ -738,6 +810,18 @@ pub fn main() {
             err_msg.as_str()
         );
     }));
+
+    // open our web session
+    open_session();
+}
+
+extern "C" {
+    fn arcrop_is_mod_enabled(hash: u64) -> bool;
+    fn arcrop_show_mod_maanager();
+}
+
+pub fn open_session() {
+    let mut config = config::get_config();
 
     let mut wav = WavReader::new(std::io::Cursor::new(BGM_WAV)).unwrap();
     let samples: Vec<i16> = wav.samples::<i16>().map(|x| x.unwrap()).collect();
@@ -788,6 +872,12 @@ pub fn main() {
                             code: plugin_version.clone(),
                             romfs: romfs_version.clone()
                         });
+
+                        if is_update_available(&session, config::is_enable_nightly_builds(&config)) {
+                            println!("updates are available!");
+                            session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Update(!)&nbsp;&nbsp;</text></div>"));
+                        }
+
                         if !Path::new("sd:/ultimate/mods/hdr").exists() {
                             session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Install&nbsp;&nbsp;</text></div>"));
                             session.send_json(&commands::ChangeHtml::new("play-button", "<div><text>Vanilla&nbsp;&nbsp;</text></div>"));
@@ -811,6 +901,19 @@ pub fn main() {
                         end_session_and_launch(&session, signal);
                         break;
                     }
+                    "open_arcropolis" => {
+                        let api_version = arcropolis_api::get_api_version();
+
+                        if api_version.major >= 1 && api_version.minor >= 7 {
+                            println!("opening arcrop menu...");
+                            end_session_and_launch(&session, signal);
+                            unsafe {
+                                arcrop_show_mod_manager();
+                                skyline::nn::oe::RequestToRelaunchApplication();
+                            }
+                            break;
+                        }   
+                    }
                     "restart" => {
                         restart(&session, signal);
                         break;
@@ -818,7 +921,8 @@ pub fn main() {
                     "verify_hdr" => {
                         let _ = verify_hdr(&session, config::is_enable_nightly_builds(&config));
                     },
-                    "update_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config)),
+                    "update_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config), false),
+                    "reinstall_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config), true),
                     "exit" => {
                         println!("exiting!");
                         unsafe { skyline::nn::oe::ExitApplication() }

@@ -85,6 +85,12 @@ function startHDR() {
     document.getElementById("mainMenu").style.display = "hidden";
 }
 
+function openArcropolis() {
+    window.nx.sendMessage("open_arcropolis");
+    document.getElementById("title").style.display = "hidden";
+    document.getElementById("mainMenu").style.display = "hidden";
+}
+
 function startGame() {
     window.location.href = `${LOCALHOST}/start`;
 }
@@ -104,7 +110,12 @@ function chooseOptions() {
 
 function updateHDR() {
     // send session
-    window.nx.sendMessage("update_hdr");
+
+    if (document.getElementById("update-button").innerHTML.includes("Fix")) {
+        window.nx.sendMessage("reinstall_hdr");
+    } else {
+        window.nx.sendMessage("update_hdr");
+    }
     viewProgress();
 }
 
