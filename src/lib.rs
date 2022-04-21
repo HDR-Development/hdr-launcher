@@ -667,26 +667,30 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std:
     // check for development.nro real quick
     let mut has_dev_nro = Path::new("sd:/atmosphere/contents/01006a800016e000/romfs/smashline/development.nro").exists();
     let mut enabled_info = "".to_string();
-/*
-    // check if hdr is enabled
-    let mut hdr_enabled = unsafe { arcrop_is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr").as_u64()) };
-    let mut hdr_assets_enabled = unsafe { arcrop_is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-assets").as_u64()) };
-    let mut hdr_stages_enabled = unsafe { arcrop_is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-stages").as_u64()) };
-    let mut hdr_dev_enabled = unsafe { arcrop_is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-dev").as_u64()) };
 
-    if !hdr_enabled {
-        enabled_info += "<br>The main hdr mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+    let api_version = arcropolis_api::get_api_version();
+
+    if api_version.major >= 1 && api_version.minor >= 7 {
+        // check if hdr is enabled
+        let mut hdr_enabled = arcropolis_api::is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr").as_u64());
+        let mut hdr_assets_enabled = arcropolis_api::is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-assets").as_u64());
+        let mut hdr_stages_enabled = arcropolis_api::is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-stages").as_u64());
+        let mut hdr_dev_enabled = arcropolis_api::is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-dev").as_u64());
+
+        if !hdr_enabled {
+            enabled_info += "<br>The main hdr mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+        }
+        if !hdr_assets_enabled {
+            enabled_info += "<br>The hdr-assets mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+        }
+        if !hdr_stages_enabled {
+            enabled_info += "<br>The hdr-stages mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+        }
+        if hdr_dev_enabled {
+            enabled_info += "<br>hdr-dev is currently enabled! Be aware that this is not currently an official build.<br>";
+        }
     }
-    if !hdr_assets_enabled {
-        enabled_info += "<br>The hdr-assets mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
-    }
-    if !hdr_stages_enabled {
-        enabled_info += "<br>The hdr-stages mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
-    }
-    if hdr_dev_enabled {
-        enabled_info += "<br>hdr-dev is currently enabled! Be aware that this is not currently an official build.<br>";
-    }
-*/
+
     if has_dev_nro {
         enabled_info += "<br>There is also a development.nro on this installation which may be a mistake! Proceed at your own peril.<br>";
     }
@@ -815,10 +819,6 @@ pub fn main() {
     open_session();
 }
 
-extern "C" {
-    fn arcrop_is_mod_enabled(hash: u64) -> bool;
-    fn arcrop_show_mod_maanager();
-}
 
 pub fn open_session() {
     let mut config = config::get_config();
@@ -902,17 +902,9 @@ pub fn open_session() {
                         break;
                     }
                     "open_arcropolis" => {
-                        let api_version = arcropolis_api::get_api_version();
-
-                        if api_version.major >= 1 && api_version.minor >= 7 {
-                            println!("opening arcrop menu...");
-                            end_session_and_launch(&session, signal);
-                            unsafe {
-                                arcrop_show_mod_manager();
-                                skyline::nn::oe::RequestToRelaunchApplication();
-                            }
-                            break;
-                        }   
+                        end_session_and_launch(&session, signal);
+                        util::try_open_arcropolis();
+                        unsafe { skyline::nn::oe::RequestToRelaunchApplication(); }
                     }
                     "restart" => {
                         restart(&session, signal);
@@ -922,7 +914,21 @@ pub fn open_session() {
                         let _ = verify_hdr(&session, config::is_enable_nightly_builds(&config));
                     },
                     "update_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config), false),
-                    "reinstall_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config), true),
+                    "reinstall_hdr" => {
+
+                        // update (install) hdr
+                        update_hdr(&session, config::is_enable_nightly_builds(&config), true);
+                        
+                        // close the session
+                        end_session_and_launch(&session, signal);
+
+                        // pop up some user instructions
+                        skyline_web::DialogOk::ok("Arcropolis' mod manager will now open. Please enable HDR's components in the Mod Manager menu to complete installation.");
+
+                        // open the arcropolis ui
+                        util::try_open_mod_manager();
+                        unsafe { skyline::nn::oe::RequestToRelaunchApplication(); }
+                    }
                     "exit" => {
                         println!("exiting!");
                         unsafe { skyline::nn::oe::ExitApplication() }

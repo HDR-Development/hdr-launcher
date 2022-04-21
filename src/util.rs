@@ -254,3 +254,26 @@ pub fn confirm_file_is_valid<P: AsRef<Path>>(path: P) -> bool {
         true
     }
 }
+
+/// tries to open the main arcropolis configuration ui
+pub fn try_open_arcropolis() {
+    let api_version = arcropolis_api::get_api_version();
+    println!("opening arcrop menu...");
+    if api_version.major >= 1 && api_version.minor >= 7 {
+        arcropolis_api::show_main_menu();
+    } else {
+        println!("Error: We cannot open arcrop because arcrop is out of date!");
+        skyline_web::DialogOk::ok("Error: Cannot open arcropolis menu because your arcropolis is out of date! You may want to update in the launcher.");
+    }
+}
+
+pub fn try_open_mod_manager() {
+    let api_version = arcropolis_api::get_api_version();
+    println!("opening arcrop mod manager...");
+    if api_version.major >= 1 && api_version.minor >= 7 {
+        arcropolis_api::show_mod_manager();
+    } else {
+        println!("Error: We cannot open arcrop because arcrop is out of date!");
+        skyline_web::DialogOk::ok("Error: Cannot open arcropolis mod manager because your arcropolis is out of date! You may want to update in the launcher.");
+    }
+}

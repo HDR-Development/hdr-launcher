@@ -110,8 +110,8 @@ function chooseOptions() {
 
 function updateHDR() {
     // send session
-
-    if (document.getElementById("update-button").innerHTML.includes("Fix")) {
+    var button_html = document.getElementById("update-button").innerHTML;
+    if (button_html.includes("Fix") || button_html.includes("Install")) {
         window.nx.sendMessage("reinstall_hdr");
     } else {
         window.nx.sendMessage("update_hdr");
