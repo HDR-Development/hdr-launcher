@@ -113,6 +113,8 @@ function updateHDR() {
     var button_html = document.getElementById("update-button").innerHTML;
     if (button_html.includes("Fix") || button_html.includes("Install")) {
         window.nx.sendMessage("reinstall_hdr");
+    } else if (button_html.includes("Switch")) {
+        window.nx.sendMessage("switch_install_type"); 
     } else {
         window.nx.sendMessage("update_hdr");
     }

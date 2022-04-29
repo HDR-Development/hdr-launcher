@@ -193,6 +193,130 @@ pub fn is_update_available(session: &WebSession, is_nightly: bool) -> bool {
 }
 
 
+/// switches the hdr installation between nightly and beta
+pub fn switch_install_type(session: &WebSession, going_to_nightly: bool) {
+    println!("beginning switch! going_to_nightly: {}", going_to_nightly);
+
+    let target_type = match going_to_nightly {
+        true => "nightly",
+        false => "beta"
+    };
+
+    if !Path::new("sd:/downloads/").exists() {
+        std::fs::create_dir("sd:/downloads/");
+    }
+    let mut current = match util::get_plugin_version() {
+        Some(v) => {
+            println!("version is : {}", v);
+            v
+        },
+        None => {
+            println!("could not determine current version!");
+            let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! You will need to fix your installation! </div>";
+            show_verification_results(html_output, session);
+            Version::new(0,0,0)
+        }
+    };
+
+    if current == Version::new(0, 0, 0) {
+        return
+    }
+
+    // delete the old update zip
+    if Path::new("sd:/downloads/hdr-update.zip").exists() {
+        println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
+        std::fs::remove_file("sd:/downloads/hdr-update.zip");
+    }
+
+    let zip_name = match going_to_nightly {
+        true => "to-nightly.zip",
+        false => "to-beta.zip"
+    };
+
+    // try and see if we can get the zip for switching
+    let can_quick_switch = match util::download_from_version(!going_to_nightly, zip_name, "hdr-update.zip", current.clone(), Some(session)) {
+        Ok(i) => {
+            println!("we can switch easily!");
+            true
+        },
+        Err(e) => {
+            println!("we cannot switch easily! Error: {:?}", e);
+            false
+        }
+    };
+
+    // if there is no switching zip available for the current version, then we will just have to perform a full install
+    if !can_quick_switch {
+        match util::download_from_latest(going_to_nightly, "switch-package.zip", "hdr-update.zip", Some(session)) {
+            Ok(i) => println!("latest full download complete."),
+            Err(e) => {
+                println!("could not get full download! Error: {:?}", e);
+                let html_output = format!(
+                    "<div id=\\\"changelogContents\\\">We could not switch easily, and we could not get the latest full install download either! Version: {}, Update failed. Error: {:?} </div>", current, e);
+                show_verification_results(html_output.as_str(), session);
+                return;
+            }
+        }
+    }
+
+    // unzip the update, and then delete the zip
+    unzip_update(&session);
+
+    if verify_hdr(session, going_to_nightly).is_ok() {
+        let html_output = format!(
+            "<div id=\\\"changelogContents\\\">Switching to {} was successful!", target_type);
+        show_verification_results(html_output.as_str(), session);
+    
+        session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Update&nbsp;&nbsp;</text>"));
+    }
+
+    session.try_send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));
+}
+
+/// unzips and then deletes the update zip
+pub fn unzip_update(session: &WebSession) {
+    session.send_json(&commands::ChangeHtml::new("progressText", "Parsing package metadata...<br>Do not exit the menu"));
+
+    let mut zip = match unzipper::get_zip_archive("sd:/downloads/hdr-update.zip") {
+        Ok(zip) => zip,
+        Err(_) => {
+            session.send_json(&commands::ChangeHtml::new("progressText", "Failed to parse package metadata..."));
+            return;
+        }
+    };
+
+    let count = zip.len();
+
+    for file_no in 0..count {
+        let mut file = zip.by_index(file_no).unwrap();
+        if !file.is_file() {
+            continue;
+        }
+
+        session.send_json(&ExtractInfo::new(
+            file_no,
+            count,
+            file.name().trim_start_matches("ultimate/mods/")
+        ));
+
+        let path = Path::new("sd:/").join(file.name());
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent);
+        }
+
+        let mut file_data = vec![];
+        file.read_to_end(&mut file_data).unwrap();
+        std::fs::write(path, file_data).unwrap();
+    }
+
+    // delete the update zip
+    if Path::new("sd:/downloads/hdr-update.zip").exists() {
+        println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
+        std::fs::remove_file("sd:/downloads/hdr-update.zip");
+    }
+}
+
+
 /// updates the hdr installation
 pub fn update_hdr(session: &WebSession, is_nightly: bool, needs_full_redownload: bool) {
     println!("beginning update! is_nightly: {}, full redownload: {}", is_nightly, needs_full_redownload);
@@ -280,47 +404,8 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool, needs_full_redownload:
             }
         }
 
-        session.send_json(&commands::ChangeHtml::new("progressText", "Parsing package metadata...<br>Do not exit the menu"));
-
-        
-        let mut zip = match unzipper::get_zip_archive("sd:/downloads/hdr-update.zip") {
-            Ok(zip) => zip,
-            Err(_) => {
-                session.send_json(&commands::ChangeHtml::new("progressText", "Failed to parse package metadata..."));
-                return;
-            }
-        };
-
-        let count = zip.len();
-
-        for file_no in 0..count {
-            let mut file = zip.by_index(file_no).unwrap();
-            if !file.is_file() {
-                continue;
-            }
-
-            session.send_json(&ExtractInfo::new(
-                file_no,
-                count,
-                file.name().trim_start_matches("ultimate/mods/")
-            ));
-
-            let path = Path::new("sd:/").join(file.name());
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent);
-            }
-
-            let mut file_data = vec![];
-            file.read_to_end(&mut file_data).unwrap();
-            std::fs::write(path, file_data).unwrap();
-        }
-
-        // delete the update zip
-        if Path::new("sd:/downloads/hdr-update.zip").exists() {
-            println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
-            std::fs::remove_file("sd:/downloads/hdr-update.zip");
-        }
-
+        // unzip the update, and then delete the zip
+        unzip_update(&session);
 
         // get the newly installed version
         let new_version = match util::get_plugin_version() {
@@ -914,6 +999,7 @@ pub fn open_session() {
                         let _ = verify_hdr(&session, config::is_enable_nightly_builds(&config));
                     },
                     "update_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config), false),
+                    "switch_install_type" => switch_install_type(&session, config::is_enable_nightly_builds(&config)),
                     "reinstall_hdr" => {
 
                         // update (install) hdr
@@ -943,7 +1029,7 @@ pub fn open_session() {
                             config::enable_nightlies(&mut config, !is_enabled);
                             session.send_json(&commands::SetOptionStatus::new("nightlies", !is_enabled));
                             if util::should_version_swap(&config) {
-                                session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Install&nbsp;&nbsp;</text>"));
+                                session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Switch&nbsp;&nbsp;</text>"));
                             } else {
                                 session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Update&nbsp;&nbsp;</text>"));
                             }
