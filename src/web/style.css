@@ -223,11 +223,14 @@ body {
     height: 80px;
     border: 5px solid rgb(17, 100, 17);
     text-align: center;
-    background-color: rgb(68, 68, 68);
+    background-color: rgb(60, 60, 60);
     color: rgb(255, 255, 255);
     padding: 5;
-    position: relative;
     box-sizing: border-box;
+}
+
+.option-active>.button-background {
+    background-color: rgb(70, 128, 70);
 }
 
 .flex-item>.item-container {

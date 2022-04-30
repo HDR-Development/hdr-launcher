@@ -11,6 +11,7 @@ var play_failure;
 
 var nightlies_check = false;
 var skip_on_launch_check = false;
+var enable_ignore_music_check = false;
 
 function nx_log(message) {
     // if (window.nx != undefined) {
@@ -68,6 +69,10 @@ function toggleNightlies() {
 
 function toggleSkipOnLaunch() {
     window.nx.sendMessage("toggle:skip_on_launch");
+}
+
+function toggleMusicCheck() {
+    window.nx.sendMessage("toggle:enable_ignore_music");
 }
 
 function updateProgress(info) {
@@ -138,11 +143,11 @@ function moveUpOptions() {
     var target = document.querySelector("#optionsMenu>button.option-active").previousElementSibling;
 
     if (source == undefined) {
-        target = document.querySelector("#optionsMenu>button:first-child");
+        target = document.querySelector("#optionsMenu>button:last-child");
     }
 
     if (target == undefined) {
-        target = document.querySelector("#optionsMenu>button:first-child");
+        target = document.querySelector("#optionsMenu>button:last-child");
     }
 
     moveOptions(source, target);
@@ -414,12 +419,16 @@ function setOption(set_option) {
         nx_log(set_option["status"]);
         nightlies_check = set_option["status"] == true;
     } else if (set_option["option"] === "skip_on_launch") {
-        skip_on_launch = set_option["status"] == true;
+        skip_on_launch_check = set_option["status"] == true;
+    }
+    else if (set_option["option"] === "enable_ignore_music") {
+        enable_ignore_music_check = set_option["status"] == true;
     }
 
     // if (nightlies_check) {
         document.getElementById("enable_nightlies").style.visibility = nightlies_check == true ? "visible" : "hidden";
-        document.getElementById("skip_on_launch").style.visibility = skip_on_launch == false ? "visible" : "hidden";
+        document.getElementById("skip_on_launch").style.visibility = skip_on_launch_check == false ? "visible" : "hidden";
+        document.getElementById("enable_ignore_music").style.visibility = enable_ignore_music_check == true ? "visible" : "hidden";
     // }
 }
 

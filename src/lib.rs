@@ -194,7 +194,8 @@ pub fn is_update_available(session: &WebSession, is_nightly: bool) -> bool {
 
 
 /// switches the hdr installation between nightly and beta
-pub fn switch_install_type(session: &WebSession, going_to_nightly: bool) {
+pub fn switch_install_type(session: &WebSession, config: &StorageHolder<SdCardStorage>) {
+    let going_to_nightly = config::is_enable_nightly_builds(&config);
     println!("beginning switch! going_to_nightly: {}", going_to_nightly);
 
     let target_type = match going_to_nightly {
@@ -262,7 +263,7 @@ pub fn switch_install_type(session: &WebSession, going_to_nightly: bool) {
     // unzip the update, and then delete the zip
     unzip_update(&session);
 
-    if verify_hdr(session, going_to_nightly).is_ok() {
+    if verify_hdr(session, &config).is_ok() {
         let html_output = format!(
             "<div id=\\\"changelogContents\\\">Switching to {} was successful!", target_type);
         show_verification_results(html_output.as_str(), session);
@@ -318,7 +319,8 @@ pub fn unzip_update(session: &WebSession) {
 
 
 /// updates the hdr installation
-pub fn update_hdr(session: &WebSession, is_nightly: bool, needs_full_redownload: bool) {
+pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, needs_full_redownload: bool) {
+    let is_nightly = config::is_enable_nightly_builds(&config);
     println!("beginning update! is_nightly: {}, full redownload: {}", is_nightly, needs_full_redownload);
     if !Path::new("sd:/downloads/").exists() {
         std::fs::create_dir("sd:/downloads/");
@@ -460,7 +462,7 @@ pub fn update_hdr(session: &WebSession, is_nightly: bool, needs_full_redownload:
 
     std::fs::remove_file("sd:/downloads/hdr-changelog.md");
 
-    if verify_hdr(session, is_nightly).is_ok() {
+    if verify_hdr(session, &config).is_ok() {
         session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
         session.try_send_json(&commands::ChangeMenu::new("text-view"));
     
@@ -487,7 +489,8 @@ enum VerifyResult {
 /// String - a warning/info output string, which may be worth displaying (if you are about to display a different UI than the one this generates)
 /// Error - potentially an Error
 /// 
-pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std::io::Error> {
+pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -> Result<String, std::io::Error> {
+    let is_nightly = config::is_enable_nightly_builds(&config);
     println!("we need to download the hashes to check. is_nightly = {}", is_nightly);
     let mut return_string = String::new();
 
@@ -567,7 +570,19 @@ pub fn verify_hdr(session: &WebSession, is_nightly: bool) -> Result<String, std:
             }
         }
         
-        let ignore_files = vec!["changelog.toml", "libarcropolis.nro", "hdr-launcher.nro"];
+        let mut ignore_files = vec!["changelog.toml", "libarcropolis.nro", "hdr-launcher.nro"];
+        
+        // if the user wants to ignore the music file during verify (so they can set up custom music),
+        // then add it to the list of ignored files
+        if config::is_enable_ignore_music(&config::get_config()) {
+            println!("ignoring music files!");
+            ignore_files.push("bgm_property.bin");
+            ignore_files.push("ui_bgm_db.prc");
+            ignore_files.push("ui_series_db.prc");
+            ignore_files.push("msg_bgm+us_en.msbt");
+            ignore_files.push("msg_title+us_en.mbst");
+            ignore_files.push("bgm_property.bin");
+        }
 
         let mut deleted_files: Vec<String> = vec![];
 
@@ -980,6 +995,10 @@ pub fn open_session() {
                             "skip_on_launch",
                             config::is_enable_skip_launcher(&config)
                         ));
+                        session.send_json(&commands::SetOptionStatus::new(
+                            "enable_ignore_music",
+                            config::is_enable_ignore_music(&config)
+                        ));
                     }
                     "start" => {
                         println!("starting hdr...");
@@ -996,14 +1015,14 @@ pub fn open_session() {
                         break;
                     }
                     "verify_hdr" => {
-                        let _ = verify_hdr(&session, config::is_enable_nightly_builds(&config));
+                        let _ = verify_hdr(&session, &config);
                     },
-                    "update_hdr" => update_hdr(&session, config::is_enable_nightly_builds(&config), false),
-                    "switch_install_type" => switch_install_type(&session, config::is_enable_nightly_builds(&config)),
+                    "update_hdr" => update_hdr(&session, &config, false),
+                    "switch_install_type" => switch_install_type(&session, &config),
                     "reinstall_hdr" => {
 
                         // update (install) hdr
-                        update_hdr(&session, config::is_enable_nightly_builds(&config), true);
+                        update_hdr(&session, &config, true);
                         
                         // close the session
                         end_session_and_launch(&session, signal);
@@ -1037,6 +1056,11 @@ pub fn open_session() {
                             let is_enabled = config::is_enable_skip_launcher(&config);
                             config::enable_skip_launcher(&mut config, !is_enabled);
                             session.send_json(&commands::SetOptionStatus::new("skip_on_launch", !is_enabled));
+                        }
+                        else if option == "enable_ignore_music" {
+                            let is_enabled = config::is_enable_ignore_music(&config);
+                            config::set_ignore_music(&mut config, !is_enabled);
+                            session.send_json(&commands::SetOptionStatus::new("enable_ignore_music", !is_enabled));
                         }
                     }
                     _ => {}
