@@ -154,8 +154,8 @@ pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>
 }
 
 pub fn is_update_available(session: Option<&WebSession>, is_nightly: bool) -> bool {
-    if !Path::new("sd:/downloads/").exists() {
-        std::fs::create_dir("sd:/downloads/");
+    if !Path::new("sd:/ultimate/hdr/downloads/").exists() {
+        std::fs::create_dir_all("sd:/ultimate/hdr/downloads/");
     }
     
     let mut current = match util::get_plugin_version() {
@@ -203,8 +203,8 @@ pub fn switch_install_type(session: &WebSession, config: &StorageHolder<SdCardSt
         false => "beta"
     };
 
-    if !Path::new("sd:/downloads/").exists() {
-        std::fs::create_dir("sd:/downloads/");
+    if !Path::new("sd:/ultimate/hdr/downloads/").exists() {
+        std::fs::create_dir_all("sd:/ultimate/hdr/downloads/");
     }
     let mut current = match util::get_plugin_version() {
         Some(v) => {
@@ -224,9 +224,9 @@ pub fn switch_install_type(session: &WebSession, config: &StorageHolder<SdCardSt
     }
 
     // delete the old update zip
-    if Path::new("sd:/downloads/hdr-update.zip").exists() {
-        println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
-        std::fs::remove_file("sd:/downloads/hdr-update.zip");
+    if Path::new("sd:/ultimate/hdr/downloads/hdr-update.zip").exists() {
+        println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/ultimate/hdr/downloads/hdr-update.zip").unwrap().len());
+        std::fs::remove_file("sd:/ultimate/hdr/downloads/hdr-update.zip");
     }
 
     let zip_name = match going_to_nightly {
@@ -288,7 +288,7 @@ fn set_nightly_toggle_button(config: &StorageHolder<SdCardStorage>, session: &We
 pub fn unzip_update(session: &WebSession) {
     session.send_json(&commands::ChangeHtml::new("progressText", "Parsing package metadata...<br>Do not exit the menu"));
 
-    let mut zip = match unzipper::get_zip_archive("sd:/downloads/hdr-update.zip") {
+    let mut zip = match unzipper::get_zip_archive("sd:/ultimate/hdr/downloads/hdr-update.zip") {
         Ok(zip) => zip,
         Err(_) => {
             session.send_json(&commands::ChangeHtml::new("progressText", "Failed to parse package metadata..."));
@@ -321,9 +321,9 @@ pub fn unzip_update(session: &WebSession) {
     }
 
     // delete the update zip
-    if Path::new("sd:/downloads/hdr-update.zip").exists() {
-        println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
-        std::fs::remove_file("sd:/downloads/hdr-update.zip");
+    if Path::new("sd:/ultimate/hdr/downloads/hdr-update.zip").exists() {
+        println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/ultimate/hdr/downloads/hdr-update.zip").unwrap().len());
+        std::fs::remove_file("sd:/ultimate/hdr/downloads/hdr-update.zip");
     }
 }
 
@@ -339,8 +339,8 @@ pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, n
 
     let is_nightly = config::is_enable_nightly_builds(&config);
     println!("beginning update! is_nightly: {}, full redownload: {}", is_nightly, needs_full_redownload);
-    if !Path::new("sd:/downloads/").exists() {
-        std::fs::create_dir("sd:/downloads/");
+    if !Path::new("sd:/ultimate/hdr/downloads/").exists() {
+        std::fs::create_dir_all("sd:/ultimate/hdr/downloads/");
     }
     let mut final_changelog = String::new();
     
@@ -391,9 +391,9 @@ pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, n
     while (current != latest) {
         
         // delete the old update zip
-        if Path::new("sd:/downloads/hdr-update.zip").exists() {
-            println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/downloads/hdr-update.zip").unwrap().len());
-            std::fs::remove_file("sd:/downloads/hdr-update.zip");
+        if Path::new("sd:/ultimate/hdr/downloads/hdr-update.zip").exists() {
+            println!("removing /downloads/hdr-update.zip, of size {}", std::fs::metadata("sd:/ultimate/hdr/downloads/hdr-update.zip").unwrap().len());
+            std::fs::remove_file("sd:/ultimate/hdr/downloads/hdr-update.zip");
         }
 
 
@@ -444,8 +444,8 @@ pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, n
         final_changelog = format!("{}\n{}", final_changelog, match util::download_from_version(is_nightly, "CHANGELOG.md", "hdr-changelog.md", new_version.clone(), Some(session)) {
             Ok(i) => {
                 // append the eventual changelog text
-                if Path::new("sd:/downloads/hdr-changelog.md").exists() {
-                    match std::fs::read_to_string("sd:/downloads/hdr-changelog.md") {
+                if Path::new("sd:/ultimate/hdr/downloads/hdr-changelog.md").exists() {
+                    match std::fs::read_to_string("sd:/ultimate/hdr/downloads/hdr-changelog.md") {
                         Ok(s) => s,
                         Err(e) => format!("Error while getting changelog for new version: {}", new_version)
 
@@ -477,7 +477,7 @@ pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, n
     html_output = html_output.replace("\"", "\\\"").replace("\n", "\\n");
     html_output = html_output.replacen(",/a></p>\\n", "</a></p>\\n<hr style=\\\"width:66%\\\"><div id=\\\"changelogContents\\\">", 1);
 
-    std::fs::remove_file("sd:/downloads/hdr-changelog.md");
+    std::fs::remove_file("sd:/ultimate/hdr/downloads/hdr-changelog.md");
 
     if verify_hdr(session, &config).is_ok() {
         session.try_send_json(&commands::ChangeHtml::new("changelog", html_output.as_str()));
@@ -530,9 +530,9 @@ pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -
             return Err(Error::new(ErrorKind::Other, "Could not determine version"));
         }
     };
-
-    if !Path::new("sd:/downloads/").exists() {
-        std::fs::create_dir("sd:/downloads/");
+    
+    if !Path::new("sd:/ultimate/hdr/downloads/").exists() {
+        std::fs::create_dir_all("sd:/ultimate/hdr/downloads/");
     }
 
     match util::download_from_version(is_nightly, "content_hashes.txt", "content_hashes.txt", version, Some(session)) {
@@ -547,7 +547,7 @@ pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -
 
     println!("downloaded version");
     
-    let file_data = std::fs::read_to_string("sd:/downloads/content_hashes.txt").unwrap();
+    let file_data = std::fs::read_to_string("sd:/ultimate/hdr/downloads/content_hashes.txt").unwrap();
 
     
     println!("read to string");
@@ -790,7 +790,7 @@ pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -
 
     // check for development.nro real quick
     let mut has_dev_nro = Path::new("sd:/atmosphere/contents/01006a800016e000/romfs/smashline/development.nro").exists();
-    let mut enabled_info = "".to_string();
+    let mut general_warnings = "".to_string();
 
     let api_version = arcropolis_api::get_api_version();
 
@@ -802,23 +802,23 @@ pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -
         let mut hdr_dev_enabled = arcropolis_api::is_mod_enabled(arcropolis_api::hash40("sd:/ultimate/mods/hdr-dev").as_u64());
 
         if !hdr_enabled {
-            enabled_info += "<br>The main hdr mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+            general_warnings += "<br>The main hdr mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
         }
         if !hdr_assets_enabled {
-            enabled_info += "<br>The hdr-assets mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+            general_warnings += "<br>The hdr-assets mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
         }
         if !hdr_stages_enabled {
-            enabled_info += "<br>The hdr-stages mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
+            general_warnings += "<br>The hdr-stages mod folder is not enabled in Arcropolis config! Please enable this in the options menu or the mod manager.<br>";
         }
         if hdr_dev_enabled {
-            enabled_info += "<br>hdr-dev is currently enabled! Be aware that this is not currently an official build.<br>";
+            general_warnings += "<br>hdr-dev is currently enabled! Be aware that this is not currently an official build.<br>";
         }
     }
 
     if has_dev_nro {
-        enabled_info += "<br>There is also a development.nro on this installation which may be a mistake! Proceed at your own peril.<br>";
+        general_warnings += "<br>There is also a development.nro on this installation which may be a mistake! Proceed at your own peril.<br>";
     }
-
+    
     let result = if missing_files.is_empty() && bad_files.is_empty() {
         html_output = "<div id=\\\"changelogContents\\\">There were no major problems found with the installation!".to_string();
         if !disabled_plugins.is_empty() {
@@ -828,7 +828,7 @@ pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -
             }
             html_output += "</ul><br><br>";
         }
-        html_output += format!("{}", enabled_info).as_str();
+        html_output += format!("{}", general_warnings).as_str();
         html_output += "</div>";
         Ok(return_string.clone())
     } else {
@@ -857,7 +857,7 @@ pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -
             }
             html_output += "</ul><br><br>"
         }
-        html_output += format!("{}", enabled_info).as_str();
+        html_output += format!("{}", general_warnings).as_str();
         html_output += "</div>";
         Err(Error::new(ErrorKind::Other, return_string.clone()))
     };
@@ -1069,6 +1069,7 @@ pub fn open_session() {
                     x if x.starts_with("toggle:") => {
                         let option = x.trim_start_matches("toggle:");
                         if option == "nightlies" {
+                            session.send_json(&commands::ChangeHtml::new("progressText", "Parsing package metadata...<br>Do not exit the menu"));
                             session.try_send_json(&commands::ChangeMenu::new("progress"));
                             let is_enabled = config::is_enable_nightly_builds(&config);
                             config::enable_nightlies(&mut config, !is_enabled);
@@ -1101,4 +1102,7 @@ pub fn open_session() {
 
     // End thread so match can actually start
     browser_thread.join();
+
+    // clear any remaining downloaded files
+    std::fs::remove_dir_all("sd:/ultimate/hdr/downloads/");
 }

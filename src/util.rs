@@ -1,10 +1,11 @@
+#![feature(io_error_more)]
 // use github::GithubRelease;
 use hound::WavReader;
 use crate::looping_audio::{LoopingAudio, AsyncCommand};
 use semver::Version;
 // use skyline::{hook, install_hook};
 use skyline_web::{Webpage, WebSession};
-use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write, BufRead, Error, ErrorKind}, path::{Path, PathBuf}};
+use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{GlobalAlloc}, io::{Read, Write, BufRead, Error, ErrorKind}, path::{Path, PathBuf}, fs::File};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use crate::*;
@@ -17,10 +18,15 @@ pub struct VersionInfo {
     pub romfs: String
 }
 
+
+/// performs a quick and dirty online check to make
+/// sure that we have internet access, since otherwise
+/// curl will crash in curl_easy_perform().
 pub fn is_online() -> bool {
     check(None).is_ok()
 }
 
+/// shows a results UI
 pub fn show_results(html: &str, session: &WebSession) {
     session.try_send_json(&commands::ChangeMenu::new("text-view"));
     session.try_send_json(&commands::ChangeHtml::new("changelog", html));
@@ -90,7 +96,7 @@ pub fn download_from_latest(is_nightly: bool, artifact_name: &str, created_file_
     let url_str = url.as_str();
     println!("downloading from version as str: {}", url_str);
 
-    download_file(url_str, format!("sd:/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())  
+    download_file(url_str, format!("sd:/ultimate/hdr/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())  
     
 }
 
@@ -108,7 +114,7 @@ pub fn download_from_version(is_nightly: bool, artifact_name: &str, created_file
     let url_str = url.as_str();
     println!("downloading from version as str: {}", url_str);
 
-    download_file(url_str, format!("sd:/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())
+    download_file(url_str, format!("sd:/ultimate/hdr/downloads/{}", created_file_name).as_str(), session, artifact_name.to_string())
 }
 
 pub fn get_latest_version(session: Option<&WebSession>, is_nightly: bool) -> Result<Version, Error> {
@@ -120,7 +126,7 @@ pub fn get_latest_version(session: Option<&WebSession>, is_nightly: bool) -> Res
         }
     }
 
-    let latest_str = match std::fs::read_to_string(Path::new("sd:/downloads/hdr_version.txt")) {
+    let latest_str = match std::fs::read_to_string(Path::new("sd:/ultimate/hdr/downloads/hdr_version.txt")) {
         Ok(i) => i,
         Err(e) => {
             println!("error while reading version string: {:?}", e);
