@@ -8,12 +8,23 @@ use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use crate::*;
+use online::sync::check;
 
 
 #[derive(Serialize, Debug)]
 pub struct VersionInfo {
     pub code: String,
     pub romfs: String
+}
+
+pub fn is_online() -> bool {
+    check(None).is_ok()
+}
+
+pub fn show_results(html: &str, session: &WebSession) {
+    session.try_send_json(&commands::ChangeMenu::new("text-view"));
+    session.try_send_json(&commands::ChangeHtml::new("changelog", html));
+    session.try_send_json(&commands::ChangeHtml::new("title", "HDR Launcher > Results"));
 }
 
 pub fn get_romfs_version() -> Option<Version> {
@@ -116,7 +127,7 @@ pub fn get_latest_version(session: Option<&WebSession>, is_nightly: bool) -> Res
             return Err(e);
         }
     };
-
+    println!("latest version str is: {}", latest_str);
     match Version::parse(latest_str.trim_start_matches("v")) {
         Ok(v) => Ok(v),
         Err(e) => Err(Error::new(ErrorKind::Other, e))
@@ -131,12 +142,17 @@ pub fn download_file(url: &str, path: &str, session: Option<&WebSession>, file_n
     //     block_home_button_short();
     // }
     
+    if !is_online() {
+        return Err(Error::new(ErrorKind::Other, format!("We do not have an internet connection! Cannot download!")));
+    }
 
     let session2 = if let Some(session) = session.as_ref() {
         *session as *const WebSession as u64
     } else {
         0
     };
+
+    println!("making updater thread");
 
     let (tx, rx) = mpsc::channel();
     let ui_updater = std::thread::spawn(move || {
@@ -158,7 +174,7 @@ pub fn download_file(url: &str, path: &str, session: Option<&WebSession>, file_n
             if let Some(session) = session.as_ref() {
                 if let Some(mut value) = value {
                     value.item_name = file_name.as_str();
-                    println!("{}", session.try_send_json(&value));
+                    //println!("{}", session.try_send_json(&value));
                 }
             }
 
@@ -166,16 +182,20 @@ pub fn download_file(url: &str, path: &str, session: Option<&WebSession>, file_n
         }
     });
 
+    println!("changing thread priority!");
+
     unsafe {
         skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 2);
     }
 
-    println!("downloading from: {}", url);
-
+    println!("checking original path: {}", path);
     // delete the original file if this file already exists on sd
     if Path::new(path).exists() {
+        println!("removing original path: {}", path);
         std::fs::remove_file(path);
     }
+
+    println!("creating file");
     let mut writer = std::io::BufWriter::with_capacity(
         0x40_0000,
         std::fs::File::create(path)?
@@ -184,20 +204,27 @@ pub fn download_file(url: &str, path: &str, session: Option<&WebSession>, file_n
     println!("trying curl with url: {}", url);
 
     let result = if let Some(session) = session {
+        println!("trying a real curl");
         crate::curl::try_curl(url, &mut writer, session, tx)
     } else {
+        println!("dropping the other thread");
         std::mem::drop(tx);
+        println!("performing maidenless curl");
         crate::curl::try_curl_maidenless(url, &mut writer)
     };
 
+    println!("flushing writer");
     writer.flush();
+    println!("dropping writer");
     std::mem::drop(writer);
 
+    println!("checking if the result is valid");
     match result {
         Ok(_) => {
             if confirm_file_is_valid(path) {
                 println!("download is successful");
             } else {
+                println!("file was not valid!");
                 return Err(Error::new(ErrorKind::Other, format!("Error while trying to download! Not found")));
             }
         },
@@ -207,6 +234,7 @@ pub fn download_file(url: &str, path: &str, session: Option<&WebSession>, file_n
         }
     };
 
+    println!("resetting priority of thread");
     unsafe {
         skyline::nn::os::ChangeThreadPriority(skyline::nn::os::GetCurrentThread(), 16);
     }
@@ -214,7 +242,7 @@ pub fn download_file(url: &str, path: &str, session: Option<&WebSession>, file_n
     println!("download complete.");    
 
     ui_updater.join();
-
+    println!("Ok(())");
     // unsafe {
     //     allow_home_button();
     //     allow_home_button_short();
@@ -227,6 +255,7 @@ pub fn download_file(url: &str, path: &str, session: Option<&WebSession>, file_n
 pub fn should_version_swap(config: &StorageHolder<SdCardStorage>) -> bool {
     let current_version = get_plugin_version();
     if let Some(current_version) = current_version {
+        println!("current version is: {}", current_version);
         let compare_to = if config::is_enable_nightly_builds(config) {
             "nightly"
         } else {
@@ -235,12 +264,14 @@ pub fn should_version_swap(config: &StorageHolder<SdCardStorage>) -> bool {
 
         current_version.pre.as_str() != compare_to
     } else {
+        println!("Could not get current version!");
         false
     }
 }
 
 pub fn confirm_file_is_valid<P: AsRef<Path>>(path: P) -> bool {
     let path = path.as_ref();
+    println!("Checking metadata");
     if std::fs::metadata(path).map(|x| x.len()).unwrap_or(0) == 0 {
         println!("{} is 0", path.display());
         return false;

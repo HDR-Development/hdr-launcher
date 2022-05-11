@@ -27,7 +27,7 @@ use std::{thread::{self, JoinHandle}, time, sync::mpsc::{Sender, self}, alloc::{
 use serde::{Serialize, Deserialize};
 use util::*;
 use std::collections::HashMap;
-
+use util::show_results;
 
 static HTML_TEXT: &str = include_str!("./web/index.html");
 static JS_TEXT: &str = include_str!("./web/script.js");
@@ -153,7 +153,7 @@ pub fn end_session_and_launch(session: &WebSession, signal: Sender<AsyncCommand>
     session.wait_for_exit();
 }
 
-pub fn is_update_available(session: &WebSession, is_nightly: bool) -> bool {
+pub fn is_update_available(session: Option<&WebSession>, is_nightly: bool) -> bool {
     if !Path::new("sd:/downloads/").exists() {
         std::fs::create_dir("sd:/downloads/");
     }
@@ -166,12 +166,12 @@ pub fn is_update_available(session: &WebSession, is_nightly: bool) -> bool {
         None => {
             println!("could not determine current version!");
             // let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! We will perform a full install! </div>";
-            // show_verification_results(html_output, session);
+            // show_results(html_output, session);
             Version::new(0,0,0)
         }
     };
 
-    let latest = match util::get_latest_version(Some(session), is_nightly) {
+    let latest = match util::get_latest_version(session, is_nightly) {
         Ok(v) => v,
         Err(e) => {
             println!("Could not determine latest version due to error: {:?}", e);
@@ -214,7 +214,7 @@ pub fn switch_install_type(session: &WebSession, config: &StorageHolder<SdCardSt
         None => {
             println!("could not determine current version!");
             let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! You will need to fix your installation! </div>";
-            show_verification_results(html_output, session);
+            show_results(html_output, session);
             Version::new(0,0,0)
         }
     };
@@ -254,7 +254,7 @@ pub fn switch_install_type(session: &WebSession, config: &StorageHolder<SdCardSt
                 println!("could not get full download! Error: {:?}", e);
                 let html_output = format!(
                     "<div id=\\\"changelogContents\\\">We could not switch easily, and we could not get the latest full install download either! Version: {}, Update failed. Error: {:?} </div>", current, e);
-                show_verification_results(html_output.as_str(), session);
+                show_results(html_output.as_str(), session);
                 return;
             }
         }
@@ -266,12 +266,22 @@ pub fn switch_install_type(session: &WebSession, config: &StorageHolder<SdCardSt
     if verify_hdr(session, &config).is_ok() {
         let html_output = format!(
             "<div id=\\\"changelogContents\\\">Switching to {} was successful!", target_type);
-        show_verification_results(html_output.as_str(), session);
+        show_results(html_output.as_str(), session);
     
         session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Update&nbsp;&nbsp;</text>"));
     }
 
     session.try_send_json(&commands::ChangeHtml::new("play-button", "<div><text>Restart&nbsp;&nbsp;</text></div>"));
+    set_nightly_toggle_button(config, session);
+}
+
+fn set_nightly_toggle_button(config: &StorageHolder<SdCardStorage>, session: &WebSession) {
+    let is_nightly = config::is_enable_nightly_builds(&config);
+    if is_nightly {
+        session.try_send_json(&commands::ChangeHtml::new("switch-button", "<div class='button-background'><h2>&nbsp;&nbsp;Switch to Beta&nbsp;&nbsp;</h2></div>"));
+    } else {
+        session.try_send_json(&commands::ChangeHtml::new("switch-button", "<div class='button-background'><h2>&nbsp;&nbsp;Switch to Nightly&nbsp;&nbsp;</h2></div>"));
+    }
 }
 
 /// unzips and then deletes the update zip
@@ -320,6 +330,13 @@ pub fn unzip_update(session: &WebSession) {
 
 /// updates the hdr installation
 pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, needs_full_redownload: bool) {
+
+    if !util::is_online() {
+        let html_output = "<div id=\\\"changelogContents\\\"> We cannot update, as you are not currently connected to the internet. </div>";
+        show_results(html_output, session);
+        return;
+    }
+
     let is_nightly = config::is_enable_nightly_builds(&config);
     println!("beginning update! is_nightly: {}, full redownload: {}", is_nightly, needs_full_redownload);
     if !Path::new("sd:/downloads/").exists() {
@@ -335,7 +352,7 @@ pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, n
         None => {
             println!("could not determine current version!");
             // let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! We will perform a full install! </div>";
-            // show_verification_results(html_output, session);
+            // show_results(html_output, session);
             Version::new(0,0,0)
         }
     };
@@ -350,7 +367,7 @@ pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, n
         Err(e) => {
             println!("Could not determine latest version due to error: {:?}", e);
             let html_output = format!("<div id=\\\"changelogContents\\\">Could not determine latest version! Please connect to the internet to update. Error: {:?} </div>", e);
-            show_verification_results(html_output.as_str(), session);
+            show_results(html_output.as_str(), session);
             return;
         }
     };
@@ -359,12 +376,12 @@ pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, n
     if latest < current && latest.pre == current.pre {
         println!("Somehow your current version ({}) is newer than the latest on the github releases ({}). This should not be possible.", current, latest);
         let html_output = format!("<div id=\\\"changelogContents\\\">Somehow your current version ({}) is newer than the latest on the github releases ({}). This should not be possible. We cannot update in this state. </div>", current, latest);
-        show_verification_results(html_output.as_str(), session);
+        show_results(html_output.as_str(), session);
         return;
     } else if current == latest {
         println!("You are already on the latest! Current install: {}, Latest: {}", current, latest);
         let html_output = format!("<div id=\\\"changelogContents\\\">You are already on the latest! Current install: {}, Latest: {}. No Update is necessary. </div>", current, latest);
-        show_verification_results(html_output.as_str(), session);
+        show_results(html_output.as_str(), session);
         return;
     } else {
         println!("we need to update. Current: {}, Latest: {}", current, latest);
@@ -400,7 +417,7 @@ pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, n
                     println!("could not get full download! Error: {:?}", e);
                     let html_output = format!(
                         "<div id=\\\"changelogContents\\\">Could not get full install download! Current version: {}, Latest: {}. Update failed. Error: {:?} </div>", current, latest, e);
-                    show_verification_results(html_output.as_str(), session);
+                    show_results(html_output.as_str(), session);
                     return;
                 }
             }
@@ -418,7 +435,7 @@ pub fn update_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>, n
             None => {
                 println!("could not determine current version!");
                 let html_output = "<div id=\\\"changelogContents\\\">Could not determine new version! Please try to update again. </div>";
-                show_verification_results(html_output, session);
+                show_results(html_output, session);
                 return;
             }
         };
@@ -490,6 +507,13 @@ enum VerifyResult {
 /// Error - potentially an Error
 /// 
 pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -> Result<String, std::io::Error> {
+
+    if !util::is_online() {
+        let html_output = "<div id=\\\"changelogContents\\\"> We cannot verify, as you are not currently connected to the internet. </div>";
+        show_results(html_output, session);
+        return Err(Error::new(ErrorKind::Other, "The system is not connected to the internet."));
+    }
+
     let is_nightly = config::is_enable_nightly_builds(&config);
     println!("we need to download the hashes to check. is_nightly = {}", is_nightly);
     let mut return_string = String::new();
@@ -502,7 +526,7 @@ pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -
         None => {
             println!("could not determine current version!");
             let html_output = "<div id=\\\"changelogContents\\\">Could not determine current version! Cannot validate! </div>";
-            show_verification_results(html_output, session);
+            show_results(html_output, session);
             return Err(Error::new(ErrorKind::Other, "Could not determine version"));
         }
     };
@@ -515,7 +539,7 @@ pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -
         Ok(_) => {},
         Err(e) => {
             println!("error: {:?}", e);
-            show_verification_results("<b>Failed to download HDR hash file in order to validate the installation. This is likely an internet connection problem.</b>", session);
+            show_results("<b>Failed to download HDR hash file in order to validate the installation. This is likely an internet connection problem.</b>", session);
             session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Fix HDR&nbsp;&nbsp;</text>"));
             return Err(Error::new(ErrorKind::Other, "Could not download the expected hash file"));
         }
@@ -838,15 +862,11 @@ pub fn verify_hdr(session: &WebSession, config: &StorageHolder<SdCardStorage>) -
         Err(Error::new(ErrorKind::Other, return_string.clone()))
     };
 
-    show_verification_results(&html_output, session);
+    show_results(&html_output, session);
     result
 }
 
-fn show_verification_results(html: &str, session: &WebSession) {
-    session.try_send_json(&commands::ChangeHtml::new("changelog", html));
-    session.try_send_json(&commands::ChangeMenu::new("text-view"));
-    session.try_send_json(&commands::ChangeHtml::new("title", "HDR Launcher > Verification Results"));
-}
+
 
 fn check_if_show_launcher(config: &StorageHolder<SdCardStorage>) -> bool {
     if !config::is_enable_skip_launcher(&config) {
@@ -861,16 +881,18 @@ fn check_if_show_launcher(config: &StorageHolder<SdCardStorage>) -> bool {
 
     let plugin_version = plugin_version.unwrap();
 
-    let latest_version = util::get_latest_version(None, config::is_enable_nightly_builds(&config));
-    if latest_version.is_err() {
-        skyline_web::DialogOk::ok("Unable to get the latest version of HDR. You will be directed to the HDR launcher.");
-        return true;
-    }
-
-    let latest_version = latest_version.unwrap();
-    if latest_version != plugin_version {
-        skyline_web::DialogOk::ok("There is an update for HDR. You will be directed to the HDR launcher.");
-        return true;
+    if util::is_online() {
+        let latest_version = util::get_latest_version(None, config::is_enable_nightly_builds(&config));
+        if latest_version.is_err() {
+            skyline_web::DialogOk::ok("Unable to get the latest version of HDR. You will be directed to the HDR launcher.");
+            return true;
+        }
+        
+        let latest_version = latest_version.unwrap();
+        if latest_version != plugin_version {
+            skyline_web::DialogOk::ok("There is an update for HDR. You will be directed to the HDR launcher.");
+            return true;
+        }
     }
 
     std::thread::sleep(std::time::Duration::from_millis(1500));
@@ -973,7 +995,7 @@ pub fn open_session() {
                             romfs: romfs_version.clone()
                         });
 
-                        if is_update_available(&session, config::is_enable_nightly_builds(&config)) {
+                        if is_update_available(None, config::is_enable_nightly_builds(&config)) {
                             println!("updates are available!");
                             session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Update(!)&nbsp;&nbsp;</text></div>"));
                         }
@@ -991,6 +1013,10 @@ pub fn open_session() {
                             "nightlies",
                             config::is_enable_nightly_builds(&config)
                         ));
+
+                        // set the correct text for the nightly/beta toggle button
+                        set_nightly_toggle_button(&config, &session);
+
                         session.send_json(&commands::SetOptionStatus::new(
                             "skip_on_launch",
                             config::is_enable_skip_launcher(&config)
@@ -1018,7 +1044,6 @@ pub fn open_session() {
                         let _ = verify_hdr(&session, &config);
                     },
                     "update_hdr" => update_hdr(&session, &config, false),
-                    "switch_install_type" => switch_install_type(&session, &config),
                     "reinstall_hdr" => {
 
                         // update (install) hdr
@@ -1044,13 +1069,16 @@ pub fn open_session() {
                     x if x.starts_with("toggle:") => {
                         let option = x.trim_start_matches("toggle:");
                         if option == "nightlies" {
+                            session.try_send_json(&commands::ChangeMenu::new("progress"));
                             let is_enabled = config::is_enable_nightly_builds(&config);
                             config::enable_nightlies(&mut config, !is_enabled);
                             session.send_json(&commands::SetOptionStatus::new("nightlies", !is_enabled));
+                            println!("enable nightlies is now: {}", config::is_enable_nightly_builds(&config));
                             if util::should_version_swap(&config) {
-                                session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Switch&nbsp;&nbsp;</text>"));
+                                println!("swapping!");
+                                switch_install_type(&session, &config);
                             } else {
-                                session.send_json(&commands::ChangeHtml::new("update-button", "<div><text>Update&nbsp;&nbsp;</text>"));
+                                println!("not swapping!");
                             }
                         } else if option == "skip_on_launch" {
                             let is_enabled = config::is_enable_skip_launcher(&config);

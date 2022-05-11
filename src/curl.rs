@@ -2,6 +2,7 @@ use std::{io::{BufWriter, Write}, fs::File, sync::mpsc::Sender};
 
 use skyline::libc::*;
 use skyline_web::WebSession;
+use online::sync::check;
 
 use crate::DownloadInfo;
 
@@ -105,51 +106,79 @@ pub fn try_curl(
     session: &WebSession,
     mut sender: Sender<DownloadInfo>
 ) -> Result<(), u32> {
-    unsafe {
-        SENDER = Some(std::mem::transmute(&mut sender as *mut Sender<DownloadInfo>));
-        // assert_eq!(global_init_mem(3, malloc, free, realloc, strdup, calloc), curl_sys::CURLE_OK);
-        let ptr = [url, "\0"].concat();
-        let curl = easy_init();
-        let header = slist_append(std::ptr::null_mut(), "Accept: application/octet-stream\0".as_ptr());
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_URL, ptr.as_str().as_ptr()))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_HTTPHEADER, header))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_FOLLOWLOCATION, 1u64))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEDATA, writer))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEFUNCTION, write_fn as *const ()))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_NOPROGRESS, 0u64))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_PROGRESSDATA, session))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_PROGRESSFUNCTION, progress_func as *const ()))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_SSL_CTX_FUNCTION, curl_ssl_ctx_callback as *const ()))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_USERAGENT, "HDR-Launcher\0".as_ptr()))?;
-        START_TICK = skyline::nn::os::GetSystemTick() as usize;
-        curle!(easy_perform(curl))?;
-        curle!(easy_cleanup(curl))?;
-    }
+    if !check(None).is_ok() {
+        println!("there is no internet connection, cannot curl!");
+        Ok(())
+    } else {
+        println!("curling is allowed, we do have internet");
+        unsafe {
+            SENDER = Some(std::mem::transmute(&mut sender as *mut Sender<DownloadInfo>));
+            // assert_eq!(global_init_mem(3, malloc, free, realloc, strdup, calloc), curl_sys::CURLE_OK);
+            let ptr = [url, "\0"].concat();
+            let curl = easy_init();
+            if curl.is_null() {
+                println!("curl was null when initializing! This likely means there is no internet connection.");
+                ()
+            }
 
-    Ok(())
+            let header = slist_append(std::ptr::null_mut(), "Accept: application/octet-stream\0".as_ptr());
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_URL, ptr.as_str().as_ptr()))?;
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_HTTPHEADER, header))?;
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_FOLLOWLOCATION, 1u64))?;
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEDATA, writer))?;
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEFUNCTION, write_fn as *const ()))?;
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_NOPROGRESS, 0u64))?;
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_PROGRESSDATA, session))?;
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_PROGRESSFUNCTION, progress_func as *const ()))?;
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_SSL_CTX_FUNCTION, curl_ssl_ctx_callback as *const ()))?;
+            curle!(easy_setopt(curl, curl_sys::CURLOPT_USERAGENT, "HDR-Launcher\0".as_ptr()))?;
+            START_TICK = skyline::nn::os::GetSystemTick() as usize;
+            curle!(easy_perform(curl))?;
+            curle!(easy_cleanup(curl))?;
+        }
+
+        Ok(())
+    }
 }
 
 pub fn try_curl_maidenless(
     url: &str,
     writer: &mut BufWriter<File>
 ) -> Result<(), u32> {
-    unsafe {
-        let ptr = [url, "\0"].concat();
-        let curl = easy_init();
-        let header = slist_append(std::ptr::null_mut(), "Accept: application/octet-stream\0".as_ptr());
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_URL, ptr.as_str().as_ptr()))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_HTTPHEADER, header))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_FOLLOWLOCATION, 1u64))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEDATA, writer))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEFUNCTION, write_fn as *const ()))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_NOPROGRESS, 0u64))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_SSL_CTX_FUNCTION, curl_ssl_ctx_callback as *const ()))?;
-        curle!(easy_setopt(curl, curl_sys::CURLOPT_USERAGENT, "HDR-Launcher\0".as_ptr()))?;
-        curle!(easy_perform(curl))?;
-        curle!(easy_cleanup(curl))?;
-    }
+    if !check(None).is_ok() {
+        println!("there is no internet connection, cannot curl!");
+        Ok(())
+    } else {
+        println!("curling is allowed, we do have internet");
+    
+        unsafe {
+            let ptr = [url, "\0"].concat();
+            println!("initializing curl...");
+            let curl = easy_init();
+            println!("Curl init return value: {:p}", curl);
+            if curl.is_null() {
+                println!("curl was null when initializing! This likely means there is no internet connection.");
+                ()
+            } else {
+                println!("curl is initialized, beginning options");
+                let header = slist_append(std::ptr::null_mut(), "Accept: application/octet-stream\0".as_ptr());
+                curle!(easy_setopt(curl, curl_sys::CURLOPT_URL, ptr.as_str().as_ptr()))?;
+                curle!(easy_setopt(curl, curl_sys::CURLOPT_HTTPHEADER, header))?;
+                curle!(easy_setopt(curl, curl_sys::CURLOPT_FOLLOWLOCATION, 1u64))?;
+                curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEDATA, writer))?;
+                curle!(easy_setopt(curl, curl_sys::CURLOPT_WRITEFUNCTION, write_fn as *const ()))?;
+                curle!(easy_setopt(curl, curl_sys::CURLOPT_NOPROGRESS, 0u64))?;
+                curle!(easy_setopt(curl, curl_sys::CURLOPT_SSL_CTX_FUNCTION, curl_ssl_ctx_callback as *const ()))?;
+                curle!(easy_setopt(curl, curl_sys::CURLOPT_USERAGENT, "HDR-Launcher\0".as_ptr()))?;
+                println!("beginning perform.");
+                curle!(easy_perform(curl))?;
+                println!("beginning curl cleanup.");
+                curle!(easy_cleanup(curl))?;
+            }
+        }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 pub fn install() {

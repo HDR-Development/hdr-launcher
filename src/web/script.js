@@ -118,8 +118,6 @@ function updateHDR() {
     var button_html = document.getElementById("update-button").innerHTML;
     if (button_html.includes("Fix") || button_html.includes("Install")) {
         window.nx.sendMessage("reinstall_hdr");
-    } else if (button_html.includes("Switch")) {
-        window.nx.sendMessage("switch_install_type"); 
     } else {
         window.nx.sendMessage("update_hdr");
     }
@@ -397,7 +395,7 @@ function updateProgressByVerify(extract_info) {
     var progress_bar = document.getElementById("progress");
     progress_bar.style.width = `${progress * 100}%`;
     progress_bar.style.backgroundColor = "var(--main-button-bg-hover-color)";
-    document.getElementById("progressText").innerHTML = `Verifying...<br>${extract_info["file_name"]}<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
+    document.getElementById("progressText").innerHTML = `Verifying and Cleaning Up...<br>${extract_info["file_name"]}<br>${extract_info["file_number"] + 1} / ${extract_info["file_count"]}`;
 }
 
 function changeMenuByCommand(change_menu) {
@@ -426,7 +424,6 @@ function setOption(set_option) {
     }
 
     // if (nightlies_check) {
-        document.getElementById("enable_nightlies").style.visibility = nightlies_check == true ? "visible" : "hidden";
         document.getElementById("skip_on_launch").style.visibility = skip_on_launch_check == false ? "visible" : "hidden";
         document.getElementById("enable_ignore_music").style.visibility = enable_ignore_music_check == true ? "visible" : "hidden";
     // }

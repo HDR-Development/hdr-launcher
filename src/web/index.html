@@ -59,20 +59,17 @@
     </div>
 
     <div id="optionsMenu" class="flex-container">
-        <button onclick="toggleNightlies()" class="flex-item">
-            <div class="icon-background"><img id="enable_nightlies" style="visibility:hidden" src="check.svg" /></div>
-            <div class="item-container">
-                <h2>Enable the nightly update channel</h2>
-            </div>
+        <button onclick="openArcropolis();" class="options-button">
+            <div class="button-background"><h2>&nbsp;&nbsp;Open Arcropolis Config&nbsp;&nbsp;</h2></div>
+        </button>
+        <button id="switch-button" onclick="toggleNightlies();" class="options-button">
+            <div class='button-background'><h2>&nbsp;&nbsp;Switch to Nightly&nbsp;&nbsp;</h2></div>
         </button>
         <button onclick="toggleSkipOnLaunch()" class="flex-item">
             <div class="icon-background"><img id="skip_on_launch" style="visibility:hidden" src="check.svg" /></div>
             <div class="item-container">
                 <h2>Always display this menu on launch</h2>
             </div>
-        </button>
-        <button onclick="openArcropolis();" class="options-button">
-            <div class="button-background"><h2>&nbsp;&nbsp;Open Arcropolis Config&nbsp;&nbsp;</h2></div>
         </button>
         <button onclick="toggleMusicCheck()" class="flex-item">
             <div class="icon-background"><img id="enable_ignore_music" style="visibility:hidden" src="check.svg" /></div>
