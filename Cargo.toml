@@ -20,7 +20,7 @@ pulldown-cmark = "0.9.1"
 hound = "3.4.0"
 zip = { version = "0.5.13", default-features = false, features = ["deflate"] }
 semver = "1.0.6"
-curl-sys = { path = "../curl-rust/curl-sys", default-features = false }
+curl-sys = { git = "https://github.com/blu-dev/curl-rust", default-features = false }
 md5 = "0.7.0"
 walkdir = "2"
 ninput = { git = "https://github.com/blu-dev/ninput" }
