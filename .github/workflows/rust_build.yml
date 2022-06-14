@@ -11,7 +11,7 @@ jobs:
   plugin:
     runs-on: ubuntu-latest
     container: 
-      image: jugeeya/cargo-skyline:2.1.0
+      image: jugeeya/cargo-skyline:3.0.0-beta-dkp
     steps:
     - uses: actions/checkout@v2
     - name: Build release NRO
